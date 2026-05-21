@@ -3,29 +3,43 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QScrollArea,
     QSizePolicy,
-    QSlider,
     QVBoxLayout,
     QWidget,
 )
 
+from core.registry import registry
+from services.protocols import ISettingsService
 from services.mock_data_provider import MockDataProvider
-from services.settings_service import SettingsService
+from theme.colors import ERROR, SUCCESS
 from ui.cards.settings_card import SettingsCard
-from ui.widgets.overlay_preview import OverlayPreviewPanel
-from ui.widgets.status_widgets import SectionHeader
+from ui.widgets.icon_label import AppIcon, icon_pixmap, inline_icon_html
 from ui.widgets.themed_button import ThemedButton
-from ui.widgets.themed_widgets import ThemedComboBox
+from ui.widgets.themed_widgets import ThemedComboBox, NoScrollSlider
 from ui.widgets.toggle_switch import ToggleSwitch
 
 
 class OverlaysPage(QWidget):
     """Overlay configuration and live preview page."""
+
+    #: Emitted when the user toggles positioning mode.
+    #: ``True`` = enter positioning mode, ``False`` = exit & save.
+    position_overlays_requested = Signal(bool)
+
+    #: Emitted when the user cancels positioning without saving.
+    cancel_position_overlays_requested = Signal()
+
+    #: Emitted in real-time as the opacity slider moves (value 0.0 – 1.0).
+    opacity_changed = Signal(float)
+
+    #: Emitted when the scale combo changes (value 0.75 – 2.0).
+    scale_changed = Signal(float)
 
     def __init__(
         self,
@@ -33,9 +47,17 @@ class OverlaysPage(QWidget):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        self._position_overlay_icon: QIcon = QIcon(
+            icon_pixmap(
+                AppIcon.VECTOR_ARRANGE_ABOVE,
+                size=ThemedButton.ICON_SIZE,
+            )
+        )
+
         self.setObjectName("PageWrapper")
-        self._svc = SettingsService.instance()
+        self._svc = registry.get(ISettingsService)
         self._provider = mock_provider
+        self._positioning_active = False
         self._build_ui()
         self._load_values()
 
@@ -67,6 +89,32 @@ class OverlaysPage(QWidget):
         vl.addWidget(sub)
         vl.addSpacing(4)
 
+        # ── Position Overlays button ──────────────────────────────────────────
+        _check_icon = inline_icon_html(AppIcon.CHECK_BOLD, size=13, color=SUCCESS)
+        position_card = SettingsCard(
+            "Overlay Positioning",
+            f"Show all overlay windows as draggable placeholders so you can arrange them on screen."
+            f" Click {_check_icon} Save Positions &nbsp;when you are done."
+        )
+
+        vl.addWidget(position_card)
+
+        pos_btn_row = QHBoxLayout()
+        self._position_btn = ThemedButton("Position Overlays", ThemedButton.VARIANT_SECONDARY)
+        self._position_btn.setIcon(self._position_overlay_icon)
+        self._position_btn.setIconSize(QSize(ThemedButton.ICON_SIZE, ThemedButton.ICON_SIZE))
+        self._position_btn.clicked.connect(self._toggle_positioning)
+
+        self._cancel_position_btn = ThemedButton("Cancel", ThemedButton.VARIANT_GHOST)
+        self._cancel_position_btn.setIcon(QIcon(icon_pixmap(AppIcon.CLOSE, size=ThemedButton.ICON_SIZE, color=ERROR)))
+        self._cancel_position_btn.clicked.connect(self._cancel_positioning)
+        self._cancel_position_btn.setVisible(False)
+
+        pos_btn_row.addWidget(self._position_btn)
+        pos_btn_row.addWidget(self._cancel_position_btn)
+        pos_btn_row.addStretch()
+        position_card.add_layout(pos_btn_row)
+
         # ── Card: Global overlay settings ─────────────────────────────────────
         global_card = SettingsCard("Global Overlay Settings", "Applied to all overlay windows.")
         vl.addWidget(global_card)
@@ -85,16 +133,13 @@ class OverlaysPage(QWidget):
         vl.addWidget(opacity_card)
 
         opacity_row = QHBoxLayout()
-        self._opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self._opacity_slider = NoScrollSlider(Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(20, 100)
         self._opacity_slider.setValue(85)
         self._opacity_slider.setFixedHeight(20)
         self._opacity_label = QLabel("85%")
-        self._opacity_label.setFixedWidth(36)
         self._opacity_label.setProperty("accent", "cyan")
-        self._opacity_slider.valueChanged.connect(
-            lambda v: self._opacity_label.setText(f"{v}%")
-        )
+        self._opacity_slider.valueChanged.connect(self._on_opacity_slider_changed)
         opacity_row.addWidget(self._opacity_slider)
         opacity_row.addWidget(self._opacity_label)
         opacity_card.add_layout(opacity_row)
@@ -107,7 +152,12 @@ class OverlaysPage(QWidget):
         for s in ["75%", "100%", "125%", "150%", "175%", "200%"]:
             self._scale_combo.addItem(s)
         self._scale_combo.setCurrentText("100%")
+        self._scale_combo.currentTextChanged.connect(self._on_scale_combo_changed)
         scale_card.add_widget(self._scale_combo)
+
+        vl.addStretch()
+        scroll.setWidget(settings_widget)
+        outer.addWidget(scroll)
 
         # ── Buttons ───────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -120,31 +170,6 @@ class OverlaysPage(QWidget):
         btn_row.addStretch()
         vl.addLayout(btn_row)
 
-        vl.addStretch()
-        scroll.setWidget(settings_widget)
-        outer.addWidget(scroll)
-
-        # ── Right: overlay preview ────────────────────────────────────────────
-        preview_container = QWidget()
-        preview_container.setObjectName("PageWrapper")
-        preview_vl = QVBoxLayout(preview_container)
-        preview_vl.setContentsMargins(8, 20, 24, 20)
-        preview_vl.setSpacing(10)
-
-        preview_title = QLabel("Live Preview")
-        preview_title.setObjectName("PageTitle")
-        preview_title.setStyleSheet("font-size: 14px;")
-        preview_vl.addWidget(preview_title)
-
-        preview_hint = QLabel("Simulated overlay — updates every 2 seconds.")
-        preview_hint.setObjectName("PageSubtitle")
-        preview_vl.addWidget(preview_hint)
-
-        self._preview = OverlayPreviewPanel(self._provider)
-        preview_vl.addWidget(self._preview)
-        preview_vl.addStretch()
-        outer.addWidget(preview_container)
-
     @staticmethod
     def _row(label: str, widget: QWidget) -> QHBoxLayout:
         hl = QHBoxLayout()
@@ -154,6 +179,34 @@ class OverlaysPage(QWidget):
         hl.addWidget(widget)
         return hl
 
+    def _on_opacity_slider_changed(self, value: int) -> None:
+        """Update the label and emit the live opacity signal."""
+        self._opacity_label.setText(f"{value}%")
+        self.opacity_changed.emit(value / 100.0)
+
+    # ── Scale helpers ──────────────────────────────────────────────────────────
+
+    _SCALE_MAP: dict[str, float] = {
+        "75%": 0.75,
+        "100%": 1.0,
+        "125%": 1.25,
+        "150%": 1.50,
+        "175%": 1.75,
+        "200%": 2.0,
+    }
+    _SCALE_REVERSE: dict[float, str] = {v: k for k, v in _SCALE_MAP.items()}  # type: ignore[misc]
+
+    def _on_scale_combo_changed(self, text: str) -> None:
+        scale = self._SCALE_MAP.get(text, 1.0)
+        self.scale_changed.emit(scale)
+
+    @staticmethod
+    def _scale_to_text(scale: float) -> str:
+        """Return the nearest combo-box label for *scale*."""
+        options = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+        nearest = min(options, key=lambda v: abs(v - scale))
+        return f"{round(nearest * 100)}%"
+
     def _load_values(self) -> None:
         ov = self._svc.settings.overlay
         self._toggle_enabled.set_checked(ov.enabled, animated=False)
@@ -162,6 +215,7 @@ class OverlaysPage(QWidget):
         pct = int(ov.opacity * 100)
         self._opacity_slider.setValue(pct)
         self._opacity_label.setText(f"{pct}%")
+        self._scale_combo.setCurrentText(self._scale_to_text(ov.scale))
 
     def _save(self) -> None:
         ov = self._svc.settings.overlay
@@ -169,10 +223,54 @@ class OverlaysPage(QWidget):
         ov.always_on_top = self._toggle_always_top.is_checked()
         ov.click_through = self._toggle_click_through.is_checked()
         ov.opacity = self._opacity_slider.value() / 100.0
+        ov.scale = self._SCALE_MAP.get(self._scale_combo.currentText(), 1.0)
         self._svc.save()
 
     def _reset(self) -> None:
         from models.settings_model import OverlaySettings
         self._svc.settings.overlay = OverlaySettings()
         self._load_values()
+
+    def _toggle_positioning(self) -> None:
+        """Enter or exit overlay positioning mode."""
+        self._positioning_active = not self._positioning_active
+        if self._positioning_active:
+            self._position_btn.setIcon(QIcon(icon_pixmap(AppIcon.CHECK_BOLD, size=ThemedButton.ICON_SIZE, color=SUCCESS)))
+            self._position_btn.setIconSize(QSize(ThemedButton.ICON_SIZE, ThemedButton.ICON_SIZE))
+            self._position_btn.setText("Save Positions")
+            self._position_btn.setProperty("variant", ThemedButton.VARIANT_PRIMARY)
+            self._cancel_position_btn.setVisible(True)
+        else:
+            self._position_btn.setIcon(self._position_overlay_icon)
+            self._position_btn.setIconSize(QSize(ThemedButton.ICON_SIZE, ThemedButton.ICON_SIZE))
+            self._position_btn.setText("Position Overlays")
+            self._position_btn.setProperty("variant", ThemedButton.VARIANT_SECONDARY)
+            self._cancel_position_btn.setVisible(False)
+        # Re-polish so the style sheet picks up the new variant property
+        self._position_btn.style().unpolish(self._position_btn)
+        self._position_btn.style().polish(self._position_btn)
+        self.position_overlays_requested.emit(self._positioning_active)
+
+    def _cancel_positioning(self) -> None:
+        """Discard new positions and exit positioning mode."""
+        self._positioning_active = False
+        self._position_btn.setIcon(self._position_overlay_icon)
+        self._position_btn.setIconSize(QSize(ThemedButton.ICON_SIZE, ThemedButton.ICON_SIZE))
+        self._position_btn.setText("Position Overlays")
+        self._position_btn.setProperty("variant", ThemedButton.VARIANT_SECONDARY)
+        self._position_btn.style().unpolish(self._position_btn)
+        self._position_btn.style().polish(self._position_btn)
+        self._cancel_position_btn.setVisible(False)
+        self.cancel_position_overlays_requested.emit()
+
+    def reset_positioning_button(self) -> None:
+        """Called by MainWindow when positioning mode ends externally (e.g. overlays closed)."""
+        self._positioning_active = False
+        self._position_btn.setIcon(self._position_overlay_icon)
+        self._position_btn.setIconSize(QSize(ThemedButton.ICON_SIZE, ThemedButton.ICON_SIZE))
+        self._position_btn.setText("Position Overlays")
+        self._position_btn.setProperty("variant", ThemedButton.VARIANT_SECONDARY)
+        self._position_btn.style().unpolish(self._position_btn)
+        self._position_btn.style().polish(self._position_btn)
+        self._cancel_position_btn.setVisible(False)
 

@@ -4,12 +4,11 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSizePolicy,
-    QSpacerItem,
     QVBoxLayout,
     QWidget,
     QAbstractButton,
@@ -17,23 +16,23 @@ from PySide6.QtWidgets import (
 
 from theme.colors import (
     ACCENT_CYAN_RGB,
-    ACCENT_GOLD_RGB,
-    CARD_BG_RGB,
-    NAVY_BG_RGB,
     TEXT_PRIMARY_RGB,
     TEXT_SECONDARY_RGB,
 )
+from ui.widgets.icon_label import AppIcon, icon_pixmap
+
 
 # Navigation item definitions: (label, icon, page_index)
-NAV_ITEMS: list[tuple[str, str, int]] = [
-    ("General", "⚙", 0),
-    ("Overlays", "◈", 1),
-    ("Parsing", "⟨/⟩", 2),
-    ("Notifications", "🔔", 3),
-    ("Appearance", "◑", 4),
-    ("Profiles", "◻", 5),
-    ("Advanced", "⊛", 6),
-    ("About", "◎", 7),
+NAV_ITEMS: list[tuple[str, AppIcon, int]] = [
+    ("General",       AppIcon.HOME,                    0),
+    ("Overlays",      AppIcon.MONITOR_DASHBOARD,       1),
+    ("Parsing",       AppIcon.APPLICATION_BRACKETS,    2),
+    ("Notifications", AppIcon.BELL,                    3),
+    ("Appearance",    AppIcon.PALETTE,                 4),
+    ("Advanced",      AppIcon.HAMMER_WRENCH,           5),
+    ("Gravity Bot",   AppIcon.ROBOT,                   6),
+    ("About",         AppIcon.INFORMATION,             7),
+    ("Dev Tools",     AppIcon.TEST_TUBE,               8),
 ]
 
 
@@ -43,7 +42,7 @@ class NavButton(QAbstractButton):
     def __init__(
         self,
         label: str,
-        icon: str,
+        icon: AppIcon,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -51,6 +50,9 @@ class NavButton(QAbstractButton):
         self._icon = icon
         self._selected = False
         self._hover_value: float = 0.0
+
+        # Pre-render a white-tinted pixmap; opacity & colour are handled in paintEvent.
+        self._icon_pixmap: QPixmap = icon_pixmap(icon, size=20, color=(255, 255, 255))
 
         self.setFixedHeight(44)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -64,6 +66,12 @@ class NavButton(QAbstractButton):
 
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
+        if not selected:
+            # Reset frozen hover state that built up while the button was selected.
+            # If the cursor is still physically over this button keep it at 1.0 so
+            # the normal hover highlight shows; otherwise snap to 0 immediately.
+            self._anim.stop()
+            self._hover_value = 1.0 if self.underMouse() else 0.0
         self.update()
 
     @property
@@ -139,13 +147,36 @@ class NavButton(QAbstractButton):
             text_color = QColor(*TEXT_SECONDARY_RGB)
             icon_color = QColor(*TEXT_SECONDARY_RGB, 160)
 
-        # Icon
-        icon_font = self.font()
-        icon_font.setPointSize(14)
-        p.setFont(icon_font)
-        p.setPen(icon_color)
+        # Icon — pixmap or text/emoji
+        # TODO: Update to use icon module
         icon_rect = r.adjusted(16, 0, -(r.width() - 44), 0)
-        p.drawText(icon_rect, Qt.AlignmentFlag.AlignCenter, self._icon)
+        if self._icon_pixmap is not None:
+            # Scale the pixmap to fit a 20×20 box centred in the icon slot
+            icon_size = 20
+            scaled = self._icon_pixmap.scaled(
+                icon_size, icon_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            draw_x = icon_rect.x() + (icon_rect.width() - scaled.width()) // 2
+            draw_y = icon_rect.y() + (icon_rect.height() - scaled.height()) // 2
+
+            if self._selected:
+                opacity = 1.0
+            elif self._hover_value > 0.001:
+                opacity = 0.55 + 0.45 * self._hover_value
+            else:
+                opacity = 0.55
+
+            p.setOpacity(opacity)
+            p.drawPixmap(draw_x, draw_y, scaled)
+            p.setOpacity(1.0)
+        else:
+            icon_font = self.font()
+            icon_font.setPointSize(14)
+            p.setFont(icon_font)
+            p.setPen(icon_color)
+            p.drawText(icon_rect, Qt.AlignmentFlag.AlignCenter, self._icon)
 
         # Label
         label_font = self.font()
@@ -164,6 +195,8 @@ class Sidebar(QWidget):
     """Left sidebar with logo, navigation, and parser status."""
 
     page_requested = Signal(int)
+    start_parser_requested = Signal()   # MainWindow reads directory from settings
+    stop_parser_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -231,15 +264,16 @@ class Sidebar(QWidget):
         status_widget.setObjectName("ParseStatusWidget")
         vl = QVBoxLayout(status_widget)
         vl.setContentsMargins(16, 10, 12, 10)
-        vl.setSpacing(4)
+        vl.setSpacing(6)
 
         label = QLabel("PARSER STATUS")
         label.setObjectName("ParseStatusLabel")
         vl.addWidget(label)
 
+        # Status indicator row
         hl = QHBoxLayout()
-        dot = _StatusDot("offline")
-        hl.addWidget(dot)
+        self._status_dot = _StatusDot("offline")
+        hl.addWidget(self._status_dot)
         self._status_text = QLabel("Not running")
         self._status_text.setObjectName("StatusBarText")
         self._status_text.setStyleSheet("color: #93A4C3; font-size: 11px;")
@@ -247,7 +281,20 @@ class Sidebar(QWidget):
         hl.addStretch()
         vl.addLayout(hl)
 
+        # Single start/stop toggle button
+        from ui.widgets.themed_button import ThemedButton  # noqa: PLC0415
+        self._parser_btn = ThemedButton("▶  Start Parser", ThemedButton.VARIANT_PRIMARY)
+        self._parser_btn.clicked.connect(self._on_parser_btn_clicked)
+        vl.addWidget(self._parser_btn)
+
+        self._parser_running = False
         return status_widget
+
+    def _on_parser_btn_clicked(self) -> None:
+        if self._parser_running:
+            self.stop_parser_requested.emit()
+        else:
+            self.start_parser_requested.emit()
 
     # ── Slots ──────────────────────────────────────────────────────────────────
 
@@ -266,10 +313,19 @@ class Sidebar(QWidget):
         self._select(index)
 
     def set_parser_status(self, running: bool, log_name: str = "") -> None:
+        self._parser_running = running
         if running:
+            self._status_dot.set_status("online")
             self._status_text.setText(log_name or "Running")
+            self._parser_btn.setText("■  Stop Parser")
+            self._parser_btn.setProperty("variant", "danger")
         else:
+            self._status_dot.set_status("offline")
             self._status_text.setText("Not running")
+            self._parser_btn.setText("▶  Start Parser")
+            self._parser_btn.setProperty("variant", "primary")
+        self._parser_btn.style().unpolish(self._parser_btn)
+        self._parser_btn.style().polish(self._parser_btn)
 
 
 class _StatusDot(QWidget):
@@ -278,11 +334,11 @@ class _StatusDot(QWidget):
         self._status = status
         self.setFixedSize(8, 8)
 
+    def set_status(self, status: str) -> None:
+        self._status = status
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: ANN001
-        colors = {
-            "online": SUCCESS_RGB if "SUCCESS_RGB" in dir() else (120, 224, 143),
-            "offline": TEXT_SECONDARY_RGB if "TEXT_SECONDARY_RGB" in dir() else (147, 164, 195),
-        }
         from theme.colors import SUCCESS_RGB, TEXT_SECONDARY_RGB  # noqa: PLC0415
         rgb = SUCCESS_RGB if self._status == "online" else TEXT_SECONDARY_RGB
         p = QPainter(self)
@@ -291,4 +347,3 @@ class _StatusDot(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(1, 1, 6, 6)
         p.end()
-

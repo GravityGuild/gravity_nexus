@@ -10,11 +10,14 @@ from dataclasses import dataclass, field
 
 @dataclass
 class GeneralSettings:
-    log_file_path: str = ""
+    log_directory: str = ""       # Path to the EverQuest "Logs" folder
     auto_start_parser: bool = False
     minimize_to_tray: bool = True
     start_with_windows: bool = False
     check_for_updates: bool = True
+    debug_logging: bool = False
+    hardware_accelerated: bool = True
+    reduce_update_rate_in_background: bool = True
 
 
 @dataclass
@@ -24,8 +27,9 @@ class OverlaySettings:
     click_through: bool = False
     always_on_top: bool = True
     scale: float = 1.0
-    # Position is stored per-overlay by name
-    positions: dict[str, tuple[int, int]] = field(default_factory=dict)
+    # Geometry is stored per-overlay by name: (x, y, width, height).
+    # Legacy entries that only have (x, y) are tolerated on load.
+    positions: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
 
 
 @dataclass
@@ -34,6 +38,8 @@ class ParsingSettings:
     show_pets: bool = True
     show_totals: bool = True
     update_interval_ms: int = 500
+    #: Maps MATCHER_KEY → enabled.  Missing keys fall back to ENABLED_BY_DEFAULT.
+    enabled_matchers: dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
@@ -52,6 +58,16 @@ class AppearanceSettings:
 
 
 @dataclass
+class GravityBotSettings:
+    """Settings for Gravity Bot integration."""
+
+    bot_url: str = ""       # e.g. "https://bot.gravityguild.com"
+    auth_token: str = ""    # plain bearer token (no "Bearer " prefix)
+    ws_enabled: bool = True  # enable WebSocket connection thread
+    auto_connect: bool = False  # connect automatically on app start
+
+
+@dataclass
 class AppSettings:
     """Top-level settings container — one per application instance."""
 
@@ -60,6 +76,6 @@ class AppSettings:
     parsing: ParsingSettings = field(default_factory=ParsingSettings)
     notifications: NotificationSettings = field(default_factory=NotificationSettings)
     appearance: AppearanceSettings = field(default_factory=AppearanceSettings)
-    active_profile: str = "Default"
+    gravity_bot: GravityBotSettings = field(default_factory=GravityBotSettings)
     window_geometry: bytes = field(default_factory=bytes)
 

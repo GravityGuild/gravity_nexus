@@ -141,15 +141,32 @@ class ThemeManager:
 
     @staticmethod
     def _do_scale(qss: str, target_pt: int) -> str:
-        """Apply the actual regex font-size substitution."""
+        """Apply the actual regex font-size and tagged min-height substitution.
+
+        Values tagged with ``/* scaleable */`` in the QSS (e.g. interactive
+        widget ``min-height`` values) are scaled proportionally alongside
+        ``font-size`` rules so that buttons and inputs can always accommodate
+        the chosen font size without clipping.
+        """
         scale = target_pt / _QSS_BASE_PX
 
-        def _replace(match: re.Match) -> str:
+        def _replace_font(match: re.Match) -> str:
             original_px = int(match.group(1))
             scaled_px = max(8, round(original_px * scale))
             return f"font-size: {scaled_px}px"
 
-        return re.sub(r"font-size:\s*(\d+)px", _replace, qss)
+        def _replace_min_height(match: re.Match) -> str:
+            original_px = int(match.group(1))
+            scaled_px = max(20, round(original_px * scale))
+            return f"min-height: {scaled_px}px; /* scaleable */"
+
+        qss = re.sub(r"font-size:\s*(\d+)px", _replace_font, qss)
+        qss = re.sub(
+            r"min-height:\s*(\d+)px;\s*/\*\s*scaleable\s*\*/",
+            _replace_min_height,
+            qss,
+        )
+        return qss
 
     def _register_fonts(self) -> None:
         """Register bundled fonts with Qt's font database."""

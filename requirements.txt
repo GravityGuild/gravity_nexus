@@ -1,4 +1,7 @@
 PySide6>=6.7.0
-nuitka>=2.0.0
-Pillow>=10.0.0
+httpx>=0.27.0
+websockets>=12.0
 
+# TODO: Build Requirements
+Pillow>=10.0.0
+nuitka>=2.0.0

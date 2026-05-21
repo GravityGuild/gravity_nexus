@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -46,7 +45,7 @@ class SearchBox(QWidget):
         layout.setContentsMargins(8, 0, 8, 0)
         layout.setSpacing(4)
 
-        self.setFixedHeight(34)
+        self.setMinimumHeight(34)
         self.setStyleSheet(
             "SearchBox {"
             "  background: rgba(11, 23, 48, 200);"
@@ -71,7 +70,6 @@ class SearchBox(QWidget):
             "  background: transparent;"
             "  border: none;"
             "  color: #E6EDF7;"
-            "  font-size: 12px;"
             "  padding: 0;"
             "}"
         )

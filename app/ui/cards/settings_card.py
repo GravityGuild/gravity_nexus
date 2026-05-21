@@ -52,15 +52,19 @@ class SettingsCard(QFrame):
 
         self._title_label = QLabel(title)
         self._title_label.setObjectName("SettingsCardTitle")
+        self._title_label.setWordWrap(True)
         title_col.addWidget(self._title_label)
 
         if subtitle:
             self._subtitle_label = QLabel(subtitle)
             self._subtitle_label.setObjectName("SettingsCardSubtitle")
+            self._subtitle_label.setWordWrap(True)
+            self._subtitle_label.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            )
             title_col.addWidget(self._subtitle_label)
 
-        header_layout.addLayout(title_col)
-        header_layout.addStretch()
+        header_layout.addLayout(title_col, 1)  # stretch=1 so it claims available width
 
         # Placeholder for optional action widgets in the header
         self._header_actions = QHBoxLayout()

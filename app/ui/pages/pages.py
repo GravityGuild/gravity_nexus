@@ -1,6 +1,7 @@
-"""Parsing, Notifications, Appearance, Profiles, Advanced, and About pages."""
+"""Parsing, Notifications, Appearance, Advanced, and About pages."""
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -14,12 +15,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from services.settings_service import SettingsService
+from core.registry import registry
+from services.protocols import ISettingsService, ILogParserService
 from theme.theme_manager import FONT_SIZE_OPTIONS, ThemeManager
 from ui.cards.settings_card import SettingsCard
-from ui.widgets.status_widgets import SectionHeader
 from ui.widgets.themed_button import ThemedButton
-from ui.widgets.themed_widgets import ThemedComboBox, ThemedLineEdit, ThemedTable
+from ui.widgets.themed_widgets import ThemedComboBox
 from ui.widgets.toggle_switch import ToggleSwitch
 
 
@@ -66,41 +67,82 @@ def _page_header(vl: QVBoxLayout, title: str, subtitle: str) -> None:
 
 
 class ParsingPage(QWidget):
-    """Log parser configuration page."""
+    """Log parser configuration page.
+
+    Toggles are generated automatically from the built-in matcher list exposed
+    by ``ILogParserService.builtin_matchers``.  To add a new matcher to this
+    page, set ``DISPLAY_NAME``, ``DESCRIPTION``, and ``MATCHER_KEY`` on the
+    matcher class and register it in ``LogParserService.__init__``.
+    """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("PageWrapper")
+        self._svc = registry.get(ISettingsService)
+        self._parser_svc = registry.get(ILogParserService)
+
         scroll, vl = _make_page_scroll()
-        _page_header(vl, "Parsing", "Configure parser windows and data collection.")
+        _page_header(vl, "Parsing", "Enable or disable individual log-event handlers.")
 
-        # DPS window card
-        dps_card = SettingsCard("DPS Window", "Time window used to calculate DPS.")
-        combo = ThemedComboBox()
-        for s in ["30 seconds", "60 seconds", "120 seconds", "300 seconds", "Fight total"]:
-            combo.addItem(s)
-        combo.setCurrentIndex(1)
-        dps_card.add_widget(combo)
-        vl.addWidget(dps_card)
+        # ── Card: active handlers ─────────────────────────────────────────────
+        handlers_card = SettingsCard(
+            "Active Handlers",
+            "Each handler listens for a specific type of log event. "
+            "Disabled handlers are skipped entirely — no CPU cost.",
+        )
+        vl.addWidget(handlers_card)
 
-        # Display options card
-        disp_card = SettingsCard("Display Options", "What to show in the DPS overlay.")
-        for label, checked in [
-            ("Show pets separately", True),
-            ("Show healing output", True),
-            ("Show total damage column", True),
-            ("Highlight critical hits", False),
-        ]:
-            row, _ = _toggle_row(label, checked)
-            disp_card.add_layout(row)
-        vl.addWidget(disp_card)
+        # Track (matcher, toggle) pairs so Save can iterate them
+        self._matcher_toggles: list[tuple] = []
 
-        vl.addWidget(ThemedButton("Save Changes", ThemedButton.VARIANT_PRIMARY))
+        matchers = self._parser_svc.builtin_matchers
+        if matchers:
+            for matcher in matchers:
+                # Look up persisted state; fall back to ENABLED_BY_DEFAULT
+                saved = self._svc.settings.parsing.enabled_matchers.get(
+                    matcher.MATCHER_KEY, matcher.ENABLED_BY_DEFAULT
+                )
+                row, tog = _toggle_row(matcher.DISPLAY_NAME, checked=saved)
+                if matcher.DESCRIPTION:
+                    # Wrap in a vertical block: toggle row + description label
+                    block = QVBoxLayout()
+                    block.setSpacing(2)
+                    block.addLayout(row)
+                    desc = QLabel(matcher.DESCRIPTION)
+                    desc.setStyleSheet(
+                        "color: rgba(147,164,195,160); font-size: 11px; padding-left: 2px;"
+                    )
+                    desc.setWordWrap(True)
+                    block.addWidget(desc)
+                    handlers_card.add_layout(block)
+                else:
+                    handlers_card.add_layout(row)
+
+                # Apply the persisted enabled state immediately
+                matcher.set_enabled(saved)
+                self._matcher_toggles.append((matcher, tog))
+        else:
+            no_matchers = QLabel("No handlers are registered.")
+            no_matchers.setProperty("secondary", "true")
+            handlers_card.add_widget(no_matchers)
+
+        # ── Save button ───────────────────────────────────────────────────────
+        save_btn = ThemedButton("Save Changes", ThemedButton.VARIANT_PRIMARY)
+        save_btn.clicked.connect(self._save)
+        vl.addWidget(save_btn)
         vl.addStretch()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
+
+    def _save(self) -> None:
+        enabled_map = self._svc.settings.parsing.enabled_matchers
+        for matcher, tog in self._matcher_toggles:
+            state = tog.is_checked()
+            enabled_map[matcher.MATCHER_KEY] = state
+            matcher.set_enabled(state)
+        self._svc.save()
 
 
 # ── Notifications Page ────────────────────────────────────────────────────────
@@ -149,7 +191,7 @@ class AppearancePage(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("PageWrapper")
-        self._svc = SettingsService.instance()
+        self._svc = registry.get(ISettingsService)
         scroll, vl = _make_page_scroll()
         _page_header(vl, "Appearance", "Themes, fonts, and visual customisation.")
 
@@ -184,10 +226,12 @@ class AppearancePage(QWidget):
         self._preview_lbl.setStyleSheet("color: #93A4C3; padding-top: 6px;")
         font_card.add_widget(self._preview_lbl)
 
+        btn_row = QHBoxLayout()
         apply_font_btn = ThemedButton("Apply Font Scale", ThemedButton.VARIANT_PRIMARY)
-        apply_font_btn.setFixedWidth(180)
         apply_font_btn.clicked.connect(self._apply_font_scale)
-        font_card.add_widget(apply_font_btn)
+        btn_row.addWidget(apply_font_btn)
+        btn_row.addStretch()
+        font_card.add_layout(btn_row)
 
         # ── Theme card ────────────────────────────────────────────────────────
         theme_card = SettingsCard("Theme", "UI colour scheme (future releases).")
@@ -224,47 +268,6 @@ class AppearancePage(QWidget):
         self._svc.save()
 
 
-# ── Profiles Page ─────────────────────────────────────────────────────────────
-
-
-class ProfilesPage(QWidget):
-    """Character / server profile manager."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("PageWrapper")
-        scroll, vl = _make_page_scroll()
-        _page_header(vl, "Profiles", "Manage character and server profiles.")
-
-        table_card = SettingsCard("Saved Profiles")
-        table = ThemedTable(0, 3)
-        table.set_column_headers(["Profile Name", "Character", "Server"])
-        table.setFixedHeight(180)
-        for row_data in [
-            ("Default", "—", "—"),
-            ("Warrior Main", "Zandakon", "Bristlebane"),
-            ("Cleric Alt", "Sylvindra", "Bristlebane"),
-        ]:
-            r = table.rowCount()
-            table.insertRow(r)
-            for c, val in enumerate(row_data):
-                from PySide6.QtWidgets import QTableWidgetItem
-                table.setItem(r, c, QTableWidgetItem(val))
-        table_card.add_widget(table)
-        vl.addWidget(table_card)
-
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(ThemedButton("New Profile", ThemedButton.VARIANT_SECONDARY))
-        btn_row.addWidget(ThemedButton("Delete", ThemedButton.VARIANT_DANGER))
-        btn_row.addStretch()
-        vl.addLayout(btn_row)
-        vl.addStretch()
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(scroll)
-
-
 # ── Advanced Page ─────────────────────────────────────────────────────────────
 
 
@@ -274,17 +277,35 @@ class AdvancedPage(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("PageWrapper")
+        self._svc = registry.get(ISettingsService)
         scroll, vl = _make_page_scroll()
         _page_header(vl, "Advanced", "Developer and power-user settings.")
 
         perf_card = SettingsCard("Performance", "Tuning for long-session stability.")
-        for label, checked in [
-            ("Enable debug logging", False),
-            ("Hardware-accelerated rendering", True),
-            ("Reduce update rate in background", True),
-        ]:
-            row, _ = _toggle_row(label, checked)
-            perf_card.add_layout(row)
+
+        # Debug logging toggle — wired up to the Python root logger
+        debug_row, self._debug_toggle = _toggle_row("Enable debug logging", False)
+        perf_card.add_layout(debug_row)
+        self._debug_toggle.toggled.connect(self._on_debug_logging_toggled)
+
+        # Hardware-accelerated rendering toggle
+        hw_row, self._hw_toggle = _toggle_row("Hardware-accelerated rendering", True)
+        perf_card.add_layout(hw_row)
+        self._hw_toggle.toggled.connect(self._on_hw_accel_toggled)
+
+        self._hw_restart_lbl = QLabel(
+            "⚠  Rendering backend change takes effect after restart."
+        )
+        self._hw_restart_lbl.setStyleSheet(
+            "color: #D8B36A; font-size: 11px; padding-left: 2px;"
+        )
+        self._hw_restart_lbl.setVisible(False)
+        perf_card.add_widget(self._hw_restart_lbl)
+
+        # Reduce update rate in background toggle
+        reduce_row, self._reduce_rate_toggle = _toggle_row("Reduce update rate in background", True)
+        perf_card.add_layout(reduce_row)
+        self._reduce_rate_toggle.toggled.connect(self._on_reduce_rate_toggled)
         vl.addWidget(perf_card)
 
         danger_card = SettingsCard("⚠ Danger Zone", "Irreversible operations.")
@@ -297,6 +318,51 @@ class AdvancedPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
+
+        # Load persisted values (no animation on initial load)
+        self._debug_toggle.set_checked(
+            self._svc.settings.general.debug_logging, animated=False
+        )
+        self._hw_toggle.set_checked(
+            self._svc.settings.general.hardware_accelerated, animated=False
+        )
+        self._reduce_rate_toggle.set_checked(
+            self._svc.settings.general.reduce_update_rate_in_background, animated=False
+        )
+
+    def _on_debug_logging_toggled(self, enabled: bool) -> None:
+        """Apply the new debug-logging level, persist the setting, and emit a log message."""
+        root = logging.getLogger()
+        if enabled:
+            root.setLevel(logging.DEBUG)
+            # Emit an info banner so the change is immediately visible in any log output
+            root.info("Debug logging ENABLED — all logger messages will now be captured.")
+            # Re-emit every existing logger's effective level so nothing is silently suppressed
+            for name, logger in logging.Logger.manager.loggerDict.items():
+                if isinstance(logger, logging.Logger):
+                    logger.debug("Logger '%s' now at effective level DEBUG", name)
+        else:
+            root.setLevel(logging.INFO)
+            root.info("Debug logging DISABLED — reverted to INFO level.")
+
+        self._svc.settings.general.debug_logging = enabled
+        self._svc.save()
+
+    def _on_hw_accel_toggled(self, enabled: bool) -> None:
+        """Persist the hardware-acceleration preference and show a restart notice."""
+        self._svc.settings.general.hardware_accelerated = enabled
+        self._svc.save()
+        # Show the restart warning only when the value differs from what is currently active
+        from PySide6.QtWidgets import QApplication as _QApp  # noqa: PLC0415
+        currently_hw = not _QApp.testAttribute(
+            Qt.ApplicationAttribute.AA_UseSoftwareOpenGL
+        )
+        self._hw_restart_lbl.setVisible(enabled != currently_hw)
+
+    def _on_reduce_rate_toggled(self, enabled: bool) -> None:
+        """Persist the reduce-update-rate-in-background preference."""
+        self._svc.settings.general.reduce_update_rate_in_background = enabled
+        self._svc.save()
 
 
 # ── About Page ────────────────────────────────────────────────────────────────

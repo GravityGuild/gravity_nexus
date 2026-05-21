@@ -1,5 +1,7 @@
 """Pages package."""
+from ui.pages.fake_log_page import FakeLogPage
 from ui.pages.general_page import GeneralPage
+from ui.pages.gravity_bot_page import GravityBotPage
 from ui.pages.overlays_page import OverlaysPage
 from ui.pages.pages import (
     AboutPage,
@@ -7,16 +9,16 @@ from ui.pages.pages import (
     AppearancePage,
     NotificationsPage,
     ParsingPage,
-    ProfilesPage,
 )
 
 __all__ = [
+    "FakeLogPage",
     "GeneralPage",
+    "GravityBotPage",
     "OverlaysPage",
     "ParsingPage",
     "NotificationsPage",
     "AppearancePage",
-    "ProfilesPage",
     "AdvancedPage",
     "AboutPage",
 ]

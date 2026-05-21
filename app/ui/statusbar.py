@@ -10,7 +10,7 @@ from ui.widgets.status_widgets import StatusIndicator
 
 
 class StatusBar(QWidget):
-    """Bottom status bar: parser state, profile, EQ connection, future metrics."""
+    """Bottom status bar: parser state, EQ connection, future metrics."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -32,12 +32,6 @@ class StatusBar(QWidget):
 
         self._eq_indicator = StatusIndicator("Gravity Bot: Disconnected", "offline")
         layout.addWidget(self._eq_indicator)
-
-        layout.addWidget(_Sep())
-
-        self._profile_label = QLabel("Profile: Default")
-        self._profile_label.setObjectName("StatusBarText")
-        layout.addWidget(self._profile_label)
 
         layout.addStretch()
 
@@ -66,9 +60,6 @@ class StatusBar(QWidget):
         else:
             self._eq_indicator.set_status("offline", "Gravity Bot: Disconnected")
 
-    def set_active_profile(self, profile_name: str) -> None:
-        self._profile_label.setText(f"Profile: {profile_name}")
-
     def set_metrics(self, text: str) -> None:
         self._metrics_label.setText(text)
 
@@ -80,4 +71,3 @@ class _Sep(QWidget):
         super().__init__(parent)
         self.setFixedSize(1, 14)
         self.setStyleSheet("background: rgba(87, 199, 255, 30);")
-
