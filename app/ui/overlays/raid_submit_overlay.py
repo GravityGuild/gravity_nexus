@@ -7,21 +7,15 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QLabel,
     QPlainTextEdit,
     QSizePolicy,
     QWidget,
 )
 
-from theme.colors import (
-    ACCENT_CYAN_RGB,
-    ACCENT_GOLD_RGB,
-    ERROR_RGB,
-    SUCCESS_RGB,
-    TEXT_SECONDARY_RGB,
-)
+from theme.spec import ColorRole, FontSize
 from ui.overlays.base_overlay_window import BaseOverlayWindow
 from ui.widgets.themed_button import ThemedButton
+from ui.widgets.themed_label import ThemedLabel
 
 log = logging.getLogger(__name__)
 
@@ -66,22 +60,21 @@ class RaidSubmitOverlay(BaseOverlayWindow):
 
     def _build_content(self) -> None:
         # ── Line-count badge ──────────────────────────────────────────────────
-        r, g, b = ACCENT_GOLD_RGB
-        badge = QLabel(f"  {len(self._lines)} lines captured  ")
-        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setStyleSheet(
-            f"background: rgba({r},{g},{b},40);"
-            f"color: rgb({r},{g},{b});"
-            "border-radius: 8px; padding: 3px 10px; font-size: 11px;"
+        badge = ThemedLabel(
+            f"  {len(self._lines)} lines captured  ",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.ACCENT_ALT,
         )
+        badge.setObjectName("OverlayBadge")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setFixedHeight(26)
         self.content_layout.addWidget(badge)
 
         # ── Preview label ─────────────────────────────────────────────────────
-        sr, sg, sb = TEXT_SECONDARY_RGB
-        preview_lbl = QLabel("Preview (first 20 lines):")
-        preview_lbl.setStyleSheet(
-            f"color: rgba({sr},{sg},{sb},230); font-size: 13px;"
+        preview_lbl = ThemedLabel(
+            "Preview (first 20 lines):",
+            font_size=FontSize.MEDIUM,
+            color_role=ColorRole.TEXT_SECONDARY,
         )
         self.content_layout.addWidget(preview_lbl)
 
@@ -90,31 +83,23 @@ class RaidSubmitOverlay(BaseOverlayWindow):
         self._preview.setReadOnly(True)
         self._preview.setFixedHeight(130)
         self._preview.setPlainText("\n".join(self._lines[:20]))
-        self._preview.setStyleSheet(
-            "background: rgba(8,17,32,200);"
-            "color: #E6EDF7;"
-            "font-family: Consolas, 'Courier New', monospace;"
-            "font-size: 13px;"
-            "border: 1px solid rgba(87,199,255,55);"
-            "border-radius: 4px;"
-        )
         self.content_layout.addWidget(self._preview)
 
         # ── Status label (empty initially) ────────────────────────────────────
-        self._status_lbl = QLabel("")
+        self._status_lbl = ThemedLabel("", font_size=FontSize.MEDIUM)
         self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._status_lbl.setStyleSheet("font-size: 13px;")
         self._status_lbl.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.content_layout.addWidget(self._status_lbl)
 
         # ── Countdown label ───────────────────────────────────────────────────
-        self._countdown_lbl = QLabel(f"Auto-dismiss in {_TIMEOUT_SECS}s")
-        self._countdown_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._countdown_lbl.setStyleSheet(
-            f"color: rgba({sr},{sg},{sb},200); font-size: 12px;"
+        self._countdown_lbl = ThemedLabel(
+            f"Auto-dismiss in {_TIMEOUT_SECS}s",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_SECONDARY,
         )
+        self._countdown_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.content_layout.addWidget(self._countdown_lbl)
 
         # ── Action buttons ────────────────────────────────────────────────────
@@ -160,7 +145,7 @@ class RaidSubmitOverlay(BaseOverlayWindow):
         if not svc.is_connected:
             self._set_status(
                 "⚠  Not connected to Gravity Bot — check the Gravity Bot page",
-                f"rgba({ERROR_RGB[0]},{ERROR_RGB[1]},{ERROR_RGB[2]},220)",
+                ColorRole.ERROR,
             )
             return
 
@@ -170,8 +155,7 @@ class RaidSubmitOverlay(BaseOverlayWindow):
             self._timer.stop()
         self._countdown_lbl.setText("")
 
-        cr, cg, cb = ACCENT_CYAN_RGB
-        self._set_status("Submitting…", f"rgba({cr},{cg},{cb},200)")
+        self._set_status("Submitting…", ColorRole.ACCENT_PRIMARY)
         self._submitted = True
         self.submitted.emit(self._lines)
         svc.submit_raid_log(self._lines)
@@ -181,27 +165,20 @@ class RaidSubmitOverlay(BaseOverlayWindow):
             return  # belongs to a different overlay instance
 
         if success:
-            sr, sg, sb = SUCCESS_RGB
-            self._set_status(
-                "✓  Submitted successfully!",
-                f"rgba({sr},{sg},{sb},220)",
-            )
+            self._set_status("✓  Submitted successfully!", ColorRole.SUCCESS)
             QTimer.singleShot(2_000, self.close)
         else:
             short = message[:80]
-            er, eg, eb = ERROR_RGB
-            self._set_status(
-                f"✗  Error: {short}",
-                f"rgba({er},{eg},{eb},220)",
-            )
+            self._set_status(f"✗  Error: {short}", ColorRole.ERROR)
             self._submit_btn.setEnabled(True)
             self._dismiss_btn.setEnabled(True)
             self._seconds_left = _TIMEOUT_SECS
             self._start_countdown()
 
-    def _set_status(self, text: str, color: str) -> None:
+    def _set_status(self, text: str, color_role: ColorRole) -> None:
+        """Update the status label text and colour role."""
         self._status_lbl.setText(text)
-        self._status_lbl.setStyleSheet(f"font-size: 13px; color: {color};")
+        self._status_lbl.set_color_role(color_role)
 
     # ── Close ──────────────────────────────────────────────────────────────────
 

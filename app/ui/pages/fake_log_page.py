@@ -18,7 +18,6 @@ from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
-    QLabel,
     QPlainTextEdit,
     QProgressBar,
     QScrollArea,
@@ -30,8 +29,10 @@ from PySide6.QtWidgets import (
 from core.registry import registry
 from services.fake_log_service import PRESETS, FakeLogService
 from services.protocols import ILogParserService
+from theme.spec import ColorRole, FontRole, FontSize
 from ui.cards.settings_card import SettingsCard
 from ui.widgets.themed_button import ThemedButton
+from ui.widgets.themed_label import ThemedLabel
 from ui.widgets.themed_widgets import ThemedComboBox, ThemedLineEdit
 
 log = logging.getLogger(__name__)
@@ -82,16 +83,23 @@ class FakeLogPage(QWidget):
         vl.setSpacing(16)
 
         # ── Header ────────────────────────────────────────────────────────────
-        title = QLabel("Log Replay / Dev Tools")
+        title = ThemedLabel(
+            "Log Replay / Dev Tools",
+            font_size=FontSize.XL,
+            color_role=ColorRole.TEXT_PRIMARY,
+            font_role=FontRole.DISPLAY,
+        )
         title.setObjectName("PageTitle")
         vl.addWidget(title)
 
-        sub = QLabel(
+        sub = ThemedLabel(
             "Inject fake EQ log lines into the parser pipeline for testing "
-            "matchers, overlays, and notifications — no real EverQuest session required."
+            "matchers, overlays, and notifications — no real EverQuest session required.",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_SECONDARY,
+            word_wrap=True,
         )
         sub.setObjectName("PageSubtitle")
-        sub.setWordWrap(True)
         vl.addWidget(sub)
         vl.addSpacing(4)
 
@@ -116,9 +124,10 @@ class FakeLogPage(QWidget):
         session_btn_row.addStretch()
         session_card.add_layout(session_btn_row)
 
-        self._session_status_lbl = QLabel("Session inactive")
-        self._session_status_lbl.setStyleSheet(
-            "color: rgba(147,164,195,160); font-size: 11px; padding-top: 2px;"
+        self._session_status_lbl = ThemedLabel(
+            "Session inactive",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_MUTED,
         )
         session_card.add_widget(self._session_status_lbl)
 
@@ -188,7 +197,7 @@ class FakeLogPage(QWidget):
         replay_card.add_layout(file_row)
 
         speed_row = QHBoxLayout()
-        speed_lbl = QLabel("Speed:")
+        speed_lbl = ThemedLabel("Speed:")
         self._speed_combo = ThemedComboBox()
         for label, _ in _SPEED_OPTIONS:
             self._speed_combo.addItem(label)
@@ -203,11 +212,6 @@ class FakeLogPage(QWidget):
         self._replay_progress.setVisible(False)
         self._replay_progress.setTextVisible(True)
         self._replay_progress.setFixedHeight(16)
-        self._replay_progress.setStyleSheet(
-            "QProgressBar { background: rgba(15,22,40,180); border: 1px solid rgba(147,164,195,40);"
-            " border-radius: 3px; color: #93A4C3; font-size: 10px; }"
-            "QProgressBar::chunk { background: rgba(0,212,255,120); border-radius: 2px; }"
-        )
         replay_card.add_widget(self._replay_progress)
 
         replay_btn_row = QHBoxLayout()
@@ -237,17 +241,6 @@ class FakeLogPage(QWidget):
         self._feed.setReadOnly(True)
         self._feed.setMaximumBlockCount(_MAX_FEED_LINES)
         self._feed.setFixedHeight(220)
-        self._feed.setStyleSheet(
-            "QPlainTextEdit {"
-            "  background: rgba(8,14,30,200);"
-            "  color: #B0C4DE;"
-            "  font-family: 'Consolas', 'Courier New', monospace;"
-            "  font-size: 11px;"
-            "  border: 1px solid rgba(147,164,195,40);"
-            "  border-radius: 4px;"
-            "  padding: 6px;"
-            "}"
-        )
         feed_card.add_widget(self._feed)
 
         clear_feed_btn = ThemedButton("Clear Feed", ThemedButton.VARIANT_SECONDARY)
@@ -299,14 +292,10 @@ class FakeLogPage(QWidget):
                 f"✓  Session active — tailing fake log for character "
                 f'"{self._svc.character_name}"'
             )
-            self._session_status_lbl.setStyleSheet(
-                "color: #78E08F; font-size: 11px; padding-top: 2px;"
-            )
+            self._session_status_lbl.set_color_role(ColorRole.SUCCESS)
         else:
             self._session_status_lbl.setText("Session inactive")
-            self._session_status_lbl.setStyleSheet(
-                "color: rgba(147,164,195,160); font-size: 11px; padding-top: 2px;"
-            )
+            self._session_status_lbl.set_color_role(ColorRole.TEXT_MUTED)
 
     # ── Manual injection ───────────────────────────────────────────────────────
 
@@ -396,4 +385,3 @@ class FakeLogPage(QWidget):
     def _on_replay_progress(self, current: int, total: int) -> None:
         self._replay_progress.setValue(current)
         self._replay_progress.setFormat(f"{current} / {total} lines")
-

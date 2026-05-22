@@ -14,7 +14,11 @@ from PySide6.QtWidgets import (
 
 
 class SearchBox(QWidget):
-    """A search-bar widget combining an icon, line edit, and clear button."""
+    """A search-bar widget combining an icon, line edit, and clear button.
+
+    Styled entirely via QSS rules targeting the ``#SearchBox*`` object names
+    defined in ``QssBuilder``.  No ``setStyleSheet`` calls are made here.
+    """
 
     text_changed = Signal(str)
     search_submitted = Signal(str)
@@ -25,6 +29,7 @@ class SearchBox(QWidget):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("SearchBox")
         self._build_ui(placeholder)
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -44,48 +49,24 @@ class SearchBox(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 8, 0)
         layout.setSpacing(4)
-
         self.setMinimumHeight(34)
-        self.setStyleSheet(
-            "SearchBox {"
-            "  background: rgba(11, 23, 48, 200);"
-            "  border: 1px solid rgba(87, 199, 255, 45);"
-            "  border-radius: 6px;"
-            "}"
-            "SearchBox:focus-within {"
-            "  border-color: rgba(87, 199, 255, 140);"
-            "}"
-        )
 
         icon = QLabel("⌕")
-        icon.setStyleSheet("color: rgba(147, 164, 195, 160); font-size: 16px; background: transparent;")
+        icon.setObjectName("SearchBoxIcon")
         icon.setFixedWidth(18)
         layout.addWidget(icon)
 
         self._edit = QLineEdit()
+        self._edit.setObjectName("SearchBoxEdit")
         self._edit.setPlaceholderText(placeholder)
         self._edit.setFrame(False)
-        self._edit.setStyleSheet(
-            "QLineEdit {"
-            "  background: transparent;"
-            "  border: none;"
-            "  color: #E6EDF7;"
-            "  padding: 0;"
-            "}"
-        )
         self._edit.textChanged.connect(self._on_text_changed)
         self._edit.returnPressed.connect(self._on_return)
         layout.addWidget(self._edit)
 
         self._clear_btn = QPushButton("✕")
+        self._clear_btn.setObjectName("SearchBoxClearBtn")
         self._clear_btn.setFixedSize(16, 16)
-        self._clear_btn.setStyleSheet(
-            "QPushButton {"
-            "  background: transparent; border: none;"
-            "  color: rgba(147, 164, 195, 120); font-size: 10px; padding: 0;"
-            "}"
-            "QPushButton:hover { color: #E6EDF7; }"
-        )
         self._clear_btn.hide()
         self._clear_btn.clicked.connect(self._edit.clear)
         layout.addWidget(self._clear_btn)
@@ -96,4 +77,3 @@ class SearchBox(QWidget):
 
     def _on_return(self) -> None:
         self.search_submitted.emit(self._edit.text())
-

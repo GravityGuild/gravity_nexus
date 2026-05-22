@@ -16,6 +16,8 @@ import logging
 import sys
 from pathlib import Path
 
+from _version import __version__
+
 # ── Ensure app/ is first on the path so all sub-module imports resolve ────────
 _APP_DIR = Path(__file__).resolve().parent
 if str(_APP_DIR) not in sys.path:
@@ -122,7 +124,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Gravity Nexus")
     app.setOrganizationName("GravityNexus")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion(__version__)
     # Keep the process alive even when the main window is hidden to the tray
     app.setQuitOnLastWindowClosed(False)
 

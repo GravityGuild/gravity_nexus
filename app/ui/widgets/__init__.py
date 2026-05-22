@@ -1,6 +1,7 @@
 """Widgets package exports."""
 from ui.widgets.icon_label import AppIcon, IconLabel, icon_pixmap
 from ui.widgets.themed_button import ThemedButton
+from ui.widgets.themed_label import ThemedLabel
 from ui.widgets.themed_widgets import (
     ThemedComboBox,
     ThemedLineEdit,
@@ -18,6 +19,7 @@ __all__ = [
     "IconLabel",
     "icon_pixmap",
     "ThemedButton",
+    "ThemedLabel",
     "ThemedComboBox",
     "ThemedLineEdit",
     "ThemedProgressBar",

@@ -1,8 +1,56 @@
-# Gravity Nexus — EverQuest Overlay Parser UI
+# Gravity Nexus
 
-A production-quality desktop overlay application for EverQuest built with **Python 3.12+** and **PySide6**.
+Raid tools and integration with Gravity discord bot and DKP Website.
 
-## Quick Start
+---
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Setup & Configuration](#setup--configuration)
+- [Features](#features)
+  - [Log Parsing](#log-parsing)
+  - [Raid Overlays](#raid-overlays)
+  - [Gravity Bot Integration](#gravity-bot-integration)
+  - [DKP Website Integration](#dkp-website-integration)
+  - [Settings](#settings)
+- [Developers](#developers)
+
+---
+
+## Installation
+
+### Requirements
+
+- Windows 10 or later
+
+### Steps
+
+1. Download the latest installer from the [Releases](#) page.
+2. Run `GravityNexus_Setup_x.x.x.exe` and follow the on-screen prompts.
+3. Launch **Gravity Nexus** from the Start Menu or Desktop shortcut.
+
+---
+
+## Setup & Configuration
+
+1. **EverQuest Log Path** — On first launch, open **Settings** and point the log file path to your P99 log folder (e.g. `C:\EverQuest\Logs`).
+2. **Discord Webhook** — Paste your Gravity Discord bot webhook URL into the **Bot Integration** settings field.
+3. **DKP Site** — Enter your DKP website credentials / API key under **DKP Settings** to allow loot submission.
+4. **Overlays** — Configure which overlays are visible and their screen positions under **Overlays** settings.
+5. Click **Save** — settings are persisted between sessions automatically.
+
+---
+
+## Features
+
+### Settings
+
+---
+
+## Developers
+
+### Quick Start
 
 ```bash
 # 1. Activate venv
@@ -18,7 +66,7 @@ python scripts/download_fonts.py
 python app/main.py
 ```
 
-## Project Structure
+### Project Structure
 
 ```
 gravity_nexus/
@@ -51,14 +99,14 @@ gravity_nexus/
 └── requirements.txt
 ```
 
-## Nuitka Build
+### Nuitka Build
 
 ```bash
 python build_nuitka.py
 # Produces dist/main.exe (standalone, no console window)
 ```
 
-## Architecture Notes
+### Architecture Notes
 
 | Concern | Approach |
 |---------|----------|

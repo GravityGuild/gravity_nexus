@@ -31,8 +31,8 @@ NAV_ITEMS: list[tuple[str, AppIcon, int]] = [
     ("Appearance",    AppIcon.PALETTE,                 4),
     ("Advanced",      AppIcon.HAMMER_WRENCH,           5),
     ("Gravity Bot",   AppIcon.ROBOT,                   6),
-    ("About",         AppIcon.INFORMATION,             7),
-    ("Dev Tools",     AppIcon.TEST_TUBE,               8),
+    ("Dev Tools",     AppIcon.TEST_TUBE,               7),
+    ("About",         AppIcon.INFORMATION,             8),
 ]
 
 
@@ -276,7 +276,6 @@ class Sidebar(QWidget):
         hl.addWidget(self._status_dot)
         self._status_text = QLabel("Not running")
         self._status_text.setObjectName("StatusBarText")
-        self._status_text.setStyleSheet("color: #93A4C3; font-size: 11px;")
         hl.addWidget(self._status_text)
         hl.addStretch()
         vl.addLayout(hl)

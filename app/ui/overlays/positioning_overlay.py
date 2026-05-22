@@ -11,11 +11,13 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QWidget
 
 from theme.colors import ACCENT_CYAN_RGB, SUCCESS
+from theme.spec import ColorRole, FontSize
 from ui.overlays.base_overlay_window import BaseOverlayWindow
 from ui.widgets.icon_label import inline_icon_html, AppIcon
+from ui.widgets.themed_label import ThemedLabel
 
 
 class PositioningOverlay(BaseOverlayWindow):
@@ -59,18 +61,14 @@ class PositioningOverlay(BaseOverlayWindow):
         r, g, b = ACCENT_CYAN_RGB
         _check_icon = inline_icon_html(AppIcon.CHECK_BOLD, size=13, color=SUCCESS)
         arrow_all_icon = inline_icon_html(AppIcon.ARROW_ALL, size=18, color=QColor(r, g, b, 200))
-        hint = QLabel(
-            f"{arrow_all_icon} drag to reposition<br><br>Click  {_check_icon} Save Positions  in the settings when done."
+        hint = ThemedLabel(
+            f"{arrow_all_icon} drag to reposition<br><br>Click  {_check_icon} Save Positions  in the settings when done.",
+            font_size=FontSize.MEDIUM,
+            color_role=ColorRole.ACCENT_PRIMARY,
+            word_wrap=True,
         )
         hint.setTextFormat(Qt.TextFormat.RichText)
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setWordWrap(True)
-        hint.setStyleSheet(
-            f"color: rgba({r},{g},{b},220);"
-            "font-size: 13px;"
-            "background: transparent;"
-            "padding: 12px;"
-        )
         self.content_layout.addWidget(hint)
 
     # ── Painting — dashed border to distinguish from real overlays ─────────────

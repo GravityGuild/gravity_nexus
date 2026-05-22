@@ -34,6 +34,7 @@ from services.protocols import IGravityBotService, ILogParserService, ISettingsS
 from services.mock_data_provider import MockDataProvider
 from ui.overlays.raid_submit_overlay import RaidSubmitOverlay
 from ui.overlays.positioning_overlay import PositioningOverlay
+from ui.overlays.quick_toolbar_overlay import QuickToolbarOverlay
 from utils.resource_utils import get_asset
 from ui.pages import (
     AboutPage,
@@ -62,6 +63,7 @@ class MainWindow(QWidget):
         self._bot_svc = registry.get(IGravityBotService)
         self._fake_log_svc = FakeLogService(self)
         self._raid_overlay: Optional[RaidSubmitOverlay] = None
+        self._toolbar_overlay: Optional[QuickToolbarOverlay] = None
         self._active_character: str = ""
         self._positioning_overlays: list[PositioningOverlay] = []
         self._position_snapshot: dict[str, tuple[int, int]] = {}  # pre-drag snapshot
@@ -72,7 +74,7 @@ class MainWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumSize(1100, 720)
         self.resize(1280, 820)
-        self.setWindowTitle("Gravity Nexus — EQ Overlay Parser")
+        self.setWindowTitle("Gravity Nexus")
 
         # Window icon (taskbar / Alt+Tab)
         icon_path = get_asset("icons/full_logo.ico")
@@ -82,6 +84,7 @@ class MainWindow(QWidget):
         self._build_ui()
         self._connect_signals()
         self._restore_geometry()
+        self._show_toolbar_overlay()
 
         self._mock_provider.start()
 
@@ -137,15 +140,16 @@ class MainWindow(QWidget):
         self._general_page = GeneralPage()
         self._overlays_page = OverlaysPage(self._mock_provider)
         pages = [
-            self._general_page,                              # 0
-            self._overlays_page,                             # 1
-            ParsingPage(),                                   # 2
-            NotificationsPage(),                             # 3
-            AppearancePage(),                                # 4
-            AdvancedPage(),                                  # 5
-            GravityBotPage(),                                # 6
-            AboutPage(),                                     # 7
-            FakeLogPage(self._fake_log_svc),                 # 8
+            self._general_page,
+            self._overlays_page,
+            ParsingPage(),
+            NotificationsPage(),
+            AppearancePage(),
+            AdvancedPage(),
+            GravityBotPage(),
+            FakeLogPage(self._fake_log_svc),
+            AboutPage(),
+
         ]
         for page in pages:
             self._stack.addWidget(page)
@@ -268,6 +272,11 @@ class MainWindow(QWidget):
                 self._raid_overlay.set_overlay_opacity(opacity)
             except RuntimeError:
                 pass
+        if self._toolbar_overlay is not None:
+            try:
+                self._toolbar_overlay.set_overlay_opacity(opacity)
+            except RuntimeError:
+                pass
         for w in self._positioning_overlays:
             try:
                 w.set_overlay_opacity(opacity)
@@ -282,6 +291,11 @@ class MainWindow(QWidget):
                 self._raid_overlay.set_overlay_scale(scale)
             except RuntimeError:
                 pass
+        if self._toolbar_overlay is not None:
+            try:
+                self._toolbar_overlay.set_overlay_scale(scale)
+            except RuntimeError:
+                pass
         for w in self._positioning_overlays:
             try:
                 w.set_overlay_scale(scale)
@@ -293,6 +307,7 @@ class MainWindow(QWidget):
     #: Maps overlay key → (display_label, default_size)
     _OVERLAY_REGISTRY: dict[str, tuple[str, tuple[int, int]]] = {
         "raid_submit": ("Raid Submit", (500, 360)),
+        "toolbar":     ("Quick Toolbar", (150, 80)),
     }
 
     def _on_position_overlays_requested(self, active: bool) -> None:
@@ -304,6 +319,13 @@ class MainWindow(QWidget):
     def _show_positioning_overlays(self) -> None:
         """Spawn a draggable placeholder for every registered overlay type."""
         self._save_and_close_positioning_overlays()  # clear any leftovers
+
+        # Hide the live toolbar so the positioning placeholder is unobstructed.
+        if self._toolbar_overlay is not None:
+            try:
+                self._toolbar_overlay.hide()
+            except RuntimeError:
+                pass
 
         # Snapshot current positions so Cancel can restore them
         self._position_snapshot = dict(self._svc.settings.overlay.positions)
@@ -345,6 +367,8 @@ class MainWindow(QWidget):
         self._positioning_overlays.clear()
         self._position_snapshot.clear()
         self._svc.save()
+        # Re-show toolbar at its (possibly new) saved position.
+        self._restore_toolbar_position()
 
     def _cancel_positioning_overlays(self) -> None:
         """Close positioning windows and restore positions to the pre-drag snapshot."""
@@ -358,6 +382,61 @@ class MainWindow(QWidget):
         self._svc.settings.overlay.positions = dict(self._position_snapshot)
         self._position_snapshot.clear()
         self._svc.save()
+        # Re-show toolbar at its original (snapshot) position.
+        self._restore_toolbar_position()
+
+    def _restore_toolbar_position(self) -> None:
+        """Move the toolbar to its saved position and make it visible."""
+        if self._toolbar_overlay is None:
+            return
+        try:
+            saved = self._svc.settings.overlay.positions.get("toolbar")
+            if saved:
+                x, y, _w, _h = saved
+                self._toolbar_overlay.move(x, y)
+            self._toolbar_overlay.show()
+        except RuntimeError:
+            pass
+
+    # ── Quick toolbar overlay ──────────────────────────────────────────────────
+
+    def _show_toolbar_overlay(self) -> None:
+        """Instantiate and show the Quick Toolbar if toolbar.enabled."""
+        if not self._svc.settings.toolbar.enabled:
+            return
+
+        self._toolbar_overlay = QuickToolbarOverlay()
+        self._toolbar_overlay.set_overlay_opacity(self._svc.settings.overlay.opacity)
+        self._toolbar_overlay.set_overlay_scale(self._svc.settings.overlay.scale)
+
+        # Restore saved position
+        saved = self._svc.settings.overlay.positions.get("toolbar")
+        if saved:
+            x, y, w, h = saved
+            self._toolbar_overlay.move(x, y)
+        else:
+            screen = QApplication.primaryScreen().geometry()
+            self._toolbar_overlay.move(
+                screen.center().x() - 60,
+                screen.top() + 80,
+            )
+
+        self._toolbar_overlay.position_changed.connect(self._on_toolbar_position_changed)
+        self._toolbar_overlay.show()
+
+    def _on_toolbar_position_changed(self) -> None:
+        """Persist the toolbar position whenever it moves."""
+        if self._toolbar_overlay is None:
+            return
+        try:
+            p = self._toolbar_overlay.pos()
+            sz = self._toolbar_overlay.size()
+            self._svc.settings.overlay.positions["toolbar"] = (
+                p.x(), p.y(), sz.width(), sz.height()
+            )
+            self._svc.save()
+        except RuntimeError:
+            pass
 
     # ── Geometry persistence ───────────────────────────────────────────────────
 
@@ -392,6 +471,11 @@ class MainWindow(QWidget):
         self._parser_svc.stop()
         self._bot_svc.shutdown()
         self._fake_log_svc.stop()
+        if self._toolbar_overlay is not None:
+            try:
+                self._toolbar_overlay.close()
+            except RuntimeError:
+                pass
         self._svc.settings.window_geometry = bytes(self.saveGeometry())
         self._svc.save()
         super().closeEvent(event)

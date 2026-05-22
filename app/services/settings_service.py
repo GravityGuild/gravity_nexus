@@ -124,6 +124,19 @@ class SettingsService:
         s.appearance.use_orbitron_headings = self._get(q, "use_orbitron_headings", s.appearance.use_orbitron_headings)
         q.endGroup()
 
+        # Toolbar
+        q.beginGroup("toolbar")
+        s.toolbar.enabled = self._get(q, "enabled", s.toolbar.enabled)
+        s.toolbar.collapsed = self._get(q, "collapsed", s.toolbar.collapsed)
+        s.toolbar.orientation = self._get(q, "orientation", s.toolbar.orientation)
+        keys_raw = q.value("button_keys")
+        if keys_raw:
+            try:
+                s.toolbar.button_keys = json.loads(keys_raw)
+            except Exception:
+                pass
+        q.endGroup()
+
         # Top-level
         geom = q.value("window_geometry")
         if geom is not None:
@@ -182,6 +195,13 @@ class SettingsService:
         q.setValue("theme_name", s.appearance.theme_name)
         q.setValue("font_size", s.appearance.font_size)
         q.setValue("use_orbitron_headings", s.appearance.use_orbitron_headings)
+        q.endGroup()
+
+        q.beginGroup("toolbar")
+        q.setValue("enabled", s.toolbar.enabled)
+        q.setValue("collapsed", s.toolbar.collapsed)
+        q.setValue("orientation", s.toolbar.orientation)
+        q.setValue("button_keys", json.dumps(s.toolbar.button_keys))
         q.endGroup()
 
         q.setValue("window_geometry", s.window_geometry)

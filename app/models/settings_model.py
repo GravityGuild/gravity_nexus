@@ -68,6 +68,16 @@ class GravityBotSettings:
 
 
 @dataclass
+class ToolbarSettings:
+    """Settings for the Quick-Action Toolbar overlay."""
+
+    enabled: bool = True
+    collapsed: bool = False
+    orientation: str = "horizontal"      # "horizontal" | "vertical"
+    button_keys: list[str] = field(default_factory=lambda: ["placeholder"])
+
+
+@dataclass
 class AppSettings:
     """Top-level settings container — one per application instance."""
 
@@ -77,5 +87,6 @@ class AppSettings:
     notifications: NotificationSettings = field(default_factory=NotificationSettings)
     appearance: AppearanceSettings = field(default_factory=AppearanceSettings)
     gravity_bot: GravityBotSettings = field(default_factory=GravityBotSettings)
+    toolbar: ToolbarSettings = field(default_factory=ToolbarSettings)
     window_geometry: bytes = field(default_factory=bytes)
 

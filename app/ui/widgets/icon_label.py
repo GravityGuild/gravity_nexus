@@ -64,6 +64,10 @@ class AppIcon(str, Enum):
     CHART_TIMELINE_VARIANT = "chart-timeline-variant.svg"
     CHECK = "check.svg"
     CHECK_BOLD = "check-bold.svg"
+    CHEVRON_DOWN_BOX_OUTLINE = "chevron-down-box-outline.svg"
+    CHEVRON_LEFT_BOX_OUTLINE = "chevron-left-box-outline.svg"
+    CHEVRON_RIGHT_BOX_OUTLINE = "chevron-right-box-outline.svg"
+    CHEVRON_UP_BOX_OUTLINE = "chevron-up-box-outline.svg"
     CLOSE = "close.svg"
     CLOSE_THICK = "close-thick.svg"
     CODE_BRACES = "code-braces.svg"
@@ -84,6 +88,9 @@ class AppIcon(str, Enum):
     ROBOT_HAPPY_OUTLINE = "robot-happy-outline.svg"
     TEST_TUBE = "test-tube.svg"
     VECTOR_ARRANGE_ABOVE = "vector-arrange-above.svg"
+    WINDOW_CLOSE = "window-close.svg"
+    WINDOW_MAXIMIZE = "window-maximize.svg"
+    WINDOW_MINIMIZE = "window-minimize.svg"
 
 
 # ── Colour input type ─────────────────────────────────────────────────────────

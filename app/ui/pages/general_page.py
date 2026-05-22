@@ -18,8 +18,10 @@ from PySide6.QtWidgets import (
 from core.registry import registry
 from services.log_parser_service import LogFileDiscovery
 from services.protocols import ISettingsService
+from theme.spec import ColorRole, FontSize
 from ui.cards.settings_card import SettingsCard
 from ui.widgets.themed_button import ThemedButton
+from ui.widgets.themed_label import ThemedLabel
 from ui.widgets.themed_widgets import ThemedLineEdit
 from ui.widgets.toggle_switch import ToggleSwitch
 
@@ -78,11 +80,12 @@ class GeneralPage(QWidget):
         log_card.add_layout(path_row)
 
         # Discovery info label — updates when the directory text changes
-        self._discovery_lbl = QLabel("")
-        self._discovery_lbl.setStyleSheet(
-            "color: rgba(147,164,195,160); font-size: 11px; padding-top: 2px;"
+        self._discovery_lbl = ThemedLabel(
+            "",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_MUTED,
+            word_wrap=True,
         )
-        self._discovery_lbl.setWordWrap(True)
         log_card.add_widget(self._discovery_lbl)
         self._log_dir_edit.textChanged.connect(self._refresh_discovery_label)
 

@@ -6,7 +6,6 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QScrollArea,
     QSizePolicy,
@@ -16,9 +15,11 @@ from PySide6.QtWidgets import (
 
 from core.registry import registry
 from services.protocols import IGravityBotService, ISettingsService
+from theme.spec import ColorRole, FontRole, FontSize
 from ui.cards.settings_card import SettingsCard
 from ui.widgets.status_widgets import StatusIndicator
 from ui.widgets.themed_button import ThemedButton
+from ui.widgets.themed_label import ThemedLabel
 from ui.widgets.themed_widgets import ThemedLineEdit
 from ui.widgets.toggle_switch import ToggleSwitch
 
@@ -50,16 +51,23 @@ class GravityBotPage(QWidget):
         vl.setSpacing(16)
 
         # Page header
-        title = QLabel("Gravity Bot")
+        title = ThemedLabel(
+            "Gravity Bot",
+            font_size=FontSize.XL,
+            color_role=ColorRole.TEXT_PRIMARY,
+            font_role=FontRole.DISPLAY,
+        )
         title.setObjectName("PageTitle")
         vl.addWidget(title)
 
-        sub = QLabel(
+        sub = ThemedLabel(
             "Connect to the Gravity guild bot for raid log submission "
-            "and real-time notifications."
+            "and real-time notifications.",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_SECONDARY,
+            word_wrap=True,
         )
         sub.setObjectName("PageSubtitle")
-        sub.setWordWrap(True)
         vl.addWidget(sub)
         vl.addSpacing(4)
 
@@ -72,7 +80,7 @@ class GravityBotPage(QWidget):
 
         # Bot URL
         url_row = QHBoxLayout()
-        url_lbl = QLabel("Bot URL:")
+        url_lbl = ThemedLabel("Bot URL:")
         url_lbl.setFixedWidth(96)
         self._url_edit = ThemedLineEdit("https://bot.gravityp99.com")
         url_row.addWidget(url_lbl)
@@ -81,7 +89,7 @@ class GravityBotPage(QWidget):
 
         # Auth token (masked)
         token_row = QHBoxLayout()
-        token_lbl = QLabel("Auth Token:")
+        token_lbl = ThemedLabel("Auth Token:")
         token_lbl.setFixedWidth(96)
         self._token_edit = ThemedLineEdit("Paste your bot token here")
         self._token_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -108,13 +116,12 @@ class GravityBotPage(QWidget):
         btn_row.addStretch()
         conn_card.add_layout(btn_row)
 
-        note = QLabel(
+        note = ThemedLabel(
             "Note: OAuth login is planned for a future release. "
-            "Use a manual bot token for now."
-        )
-        note.setWordWrap(True)
-        note.setStyleSheet(
-            "color: rgba(147,164,195,120); font-size: 11px; padding-top: 4px;"
+            "Use a manual bot token for now.",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_MUTED,
+            word_wrap=True,
         )
         conn_card.add_widget(note)
 
@@ -123,7 +130,7 @@ class GravityBotPage(QWidget):
         vl.addWidget(opts_card)
 
         ws_row = QHBoxLayout()
-        ws_lbl = QLabel("Enable WebSocket")
+        ws_lbl = ThemedLabel("Enable WebSocket")
         ws_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._ws_toggle = ToggleSwitch(checked=True)
         ws_row.addWidget(ws_lbl)
@@ -131,7 +138,7 @@ class GravityBotPage(QWidget):
         opts_card.add_layout(ws_row)
 
         auto_row = QHBoxLayout()
-        auto_lbl = QLabel("Auto-connect on startup")
+        auto_lbl = ThemedLabel("Auto-connect on startup")
         auto_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._auto_toggle = ToggleSwitch(checked=False)
         auto_row.addWidget(auto_lbl)

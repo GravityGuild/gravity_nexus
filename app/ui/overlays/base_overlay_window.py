@@ -12,7 +12,7 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from theme.colors import ACCENT_CYAN_RGB, NAVY_BG_RGB, TEXT_PRIMARY_RGB
+from theme.colors import ACCENT_CYAN_RGB, TEXT_PRIMARY_RGB
 from utils.platform_utils import set_window_click_through
 
 # Minimum size the overlay may be shrunk to (pixels)
@@ -77,10 +77,6 @@ class BaseOverlayWindow(QWidget):
 
         self._frame = QWidget()
         self._frame.setObjectName("BaseOverlay")
-        r, g, b = NAVY_BG_RGB
-        self._frame.setStyleSheet(
-            f"#BaseOverlay {{ background-color: rgb({r}, {g}, {b}); border-radius: 8px; }}"
-        )
         frame_layout = QVBoxLayout(self._frame)
         frame_layout.setContentsMargins(0, 0, 0, 0)
         frame_layout.setSpacing(0)
@@ -92,7 +88,6 @@ class BaseOverlayWindow(QWidget):
 
         # Content area — subclasses populate this
         self._content_widget = QWidget()
-        self._content_widget.setStyleSheet("background: transparent;")
         self.content_layout = QVBoxLayout(self._content_widget)
         self.content_layout.setContentsMargins(8, 6, 8, 8)
         self.content_layout.setSpacing(6)

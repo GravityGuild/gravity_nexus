@@ -17,11 +17,14 @@ from PySide6.QtWidgets import (
 
 from core.registry import registry
 from services.protocols import ISettingsService, ILogParserService
+from theme.spec import ColorRole, FontRole, FontSize
 from theme.theme_manager import FONT_SIZE_OPTIONS, ThemeManager
 from ui.cards.settings_card import SettingsCard
 from ui.widgets.themed_button import ThemedButton
+from ui.widgets.themed_label import ThemedLabel
 from ui.widgets.themed_widgets import ThemedComboBox
 from ui.widgets.toggle_switch import ToggleSwitch
+from _version import __version__
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -108,11 +111,12 @@ class ParsingPage(QWidget):
                     block = QVBoxLayout()
                     block.setSpacing(2)
                     block.addLayout(row)
-                    desc = QLabel(matcher.DESCRIPTION)
-                    desc.setStyleSheet(
-                        "color: rgba(147,164,195,160); font-size: 11px; padding-left: 2px;"
+                    desc = ThemedLabel(
+                        matcher.DESCRIPTION,
+                        font_size=FontSize.SMALL,
+                        color_role=ColorRole.TEXT_MUTED,
+                        word_wrap=True,
                     )
-                    desc.setWordWrap(True)
                     block.addWidget(desc)
                     handlers_card.add_layout(block)
                 else:
@@ -221,9 +225,11 @@ class AppearancePage(QWidget):
         font_card.add_layout(size_row)
 
         # Preview label so the change is immediately visible
-        self._preview_lbl = QLabel("The quick brown fox jumps over the lazy dog — 0123456789")
-        self._preview_lbl.setWordWrap(True)
-        self._preview_lbl.setStyleSheet("color: #93A4C3; padding-top: 6px;")
+        self._preview_lbl = ThemedLabel(
+            "The quick brown fox jumps over the lazy dog — 0123456789",
+            color_role=ColorRole.TEXT_SECONDARY,
+            word_wrap=True,
+        )
         font_card.add_widget(self._preview_lbl)
 
         btn_row = QHBoxLayout()
@@ -293,11 +299,10 @@ class AdvancedPage(QWidget):
         perf_card.add_layout(hw_row)
         self._hw_toggle.toggled.connect(self._on_hw_accel_toggled)
 
-        self._hw_restart_lbl = QLabel(
-            "⚠  Rendering backend change takes effect after restart."
-        )
-        self._hw_restart_lbl.setStyleSheet(
-            "color: #D8B36A; font-size: 11px; padding-left: 2px;"
+        self._hw_restart_lbl = ThemedLabel(
+            "⚠  Rendering backend change takes effect after restart.",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.ACCENT_ALT,
         )
         self._hw_restart_lbl.setVisible(False)
         perf_card.add_widget(self._hw_restart_lbl)
@@ -376,34 +381,27 @@ class AboutPage(QWidget):
         self.setObjectName("PageWrapper")
         scroll, vl = _make_page_scroll()
 
-        title = QLabel("GRAVITY NEXUS")
-        title.setObjectName("AppTitleLabel")
-        title.setStyleSheet(
-            "font-family: 'Orbitron', 'Segoe UI'; font-size: 26px;"
-            "color: #D8B36A; letter-spacing: 4px;"
+        title = ThemedLabel(
+            "GRAVITY NEXUS",
+            font_size=FontSize.HEADING,
+            color_role=ColorRole.ACCENT_ALT,
+            font_role=FontRole.DISPLAY,
         )
+        title.setObjectName("AboutTitle")
         vl.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        for text, style in [
-            ("EverQuest Overlay Parser — UI Foundation", "color: #93A4C3; font-size: 13px;"),
-            ("Version 1.0.0 — Built with PySide6", "color: #93A4C3; font-size: 12px;"),
-            ("", ""),
-            ("© 2026 Gravity Nexus Contributors", "color: rgba(147,164,195,80); font-size: 11px;"),
-        ]:
-            if not text:
-                vl.addSpacing(8)
-                continue
-            lbl = QLabel(text)
-            lbl.setStyleSheet(style)
-            vl.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        about_card = SettingsCard("About This Build")
+        _link_color = ThemeManager.instance().get_color(ColorRole.TEXT_PRIMARY)
+        about_card = SettingsCard("About")
         about_text = QLabel(
-            "Gravity Nexus is a modular real-time log parser and overlay system "
-            "for EverQuest. This release contains the UI foundation and theming "
-            "system only. Parser logic, WebSocket services, and plugin overlays "
-            "will be added in future releases."
+            "Gravity Nexus is a set of tools and overlays for interacting with Gravity's discord bot and raid website. "
+            "<ul>"
+            f"<li><a href='https://gravityp99.com/' style='color: {_link_color};'>Guild Website</a></li>"
+            f"<li><a href='https://github.com/GravityGuild/gravity_nexus' style='color: {_link_color};'>Gravity Nexus Github</a></li>"
+            f"<li><a href='https://github.com/GravityGuild/gravity_nexus/releases' style='color: {_link_color};'>Releases</a></li>"
+            f"<li><a href='https://github.com/GravityGuild/gravity_nexus' style='color: {_link_color};'>Changelog</a></li>"
+            "</ul>"
         )
+        about_text.setOpenExternalLinks(True)
         about_text.setWordWrap(True)
         about_text.setProperty("secondary", "true")
         about_card.add_widget(about_text)
@@ -411,7 +409,13 @@ class AboutPage(QWidget):
 
         vl.addStretch()
 
+        ver_lbl = ThemedLabel(
+            f"Version {__version__}",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_SECONDARY,
+        )
+        vl.addWidget(ver_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
-

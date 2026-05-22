@@ -22,9 +22,16 @@ ENTRY_POINT = APP_DIR / "main.py"
 
 ICON_ICO = APP_DIR / "assets" / "icons" / "full_logo.ico"
 
+# ── Version — read from the single source of truth ───────────────────────────
+sys.path.insert(0, str(APP_DIR))
+from _version import __version__ as APP_VERSION  # noqa: E402
+
+# Nuitka expects a 4-part Windows version string (e.g. "1.0.0.0")
+_WIN_VERSION = APP_VERSION if APP_VERSION.count(".") == 3 else APP_VERSION + ".0"
+
 
 def build() -> int:
-    print("Building Gravity Nexus …\n")
+    print(f"Building Gravity Nexus v{APP_VERSION} …\n")
 
     if not ICON_ICO.exists():
         print(f"  ✗ Icon not found: {ICON_ICO}")
@@ -42,8 +49,8 @@ def build() -> int:
         # Windows-specific — native .ico required by Nuitka
         "--windows-console-mode=disable",
         "--windows-product-name=Gravity Nexus",
-        "--windows-file-version=1.0.0.0",
-        "--windows-product-version=1.0.0.0",
+        f"--windows-file-version={_WIN_VERSION}",
+        f"--windows-product-version={_WIN_VERSION}",
         "--windows-file-description=EverQuest Overlay Parser",
         f"--windows-icon-from-ico={ICON_ICO}",
         # PySide6 plugin
