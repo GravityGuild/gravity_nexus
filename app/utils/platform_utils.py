@@ -48,6 +48,39 @@ def set_window_click_through(hwnd: int, enabled: bool) -> bool:
         return False
 
 
+def apply_startup_with_windows(enabled: bool) -> None:
+    """Add or remove Gravity Nexus from the Windows startup registry.
+
+    Uses HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run so no
+    elevated permissions are needed.  No-op on non-Windows platforms.
+    """
+    if not _IS_WINDOWS:
+        return
+    import winreg  # stdlib, Windows-only  # noqa: PLC0415
+    _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    _VALUE_NAME = "GravityNexus"
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            _RUN_KEY,
+            0,
+            winreg.KEY_SET_VALUE,
+        )
+        if enabled:
+            exe = sys.executable
+            winreg.SetValueEx(key, _VALUE_NAME, 0, winreg.REG_SZ, f'"{exe}"')
+            log.debug("Added startup registry entry: %s", exe)
+        else:
+            try:
+                winreg.DeleteValue(key, _VALUE_NAME)
+                log.debug("Removed startup registry entry")
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not update startup registry key: %s", exc)
+
+
 def set_app_user_model_id(app_id: str) -> None:
     """Set the Windows Application User Model ID for taskbar grouping.
 

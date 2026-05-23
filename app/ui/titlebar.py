@@ -1,20 +1,20 @@
 """CustomTitleBar — frameless window title bar with drag and window controls."""
 from __future__ import annotations
 
-from pathlib import Path
+import os
 from typing import Optional
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QMouseEvent, QPixmap
+from PySide6.QtGui import QMouseEvent, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from ui.widgets import icon_pixmap, AppIcon
 from utils.resource_utils import get_asset
 
 _ICON_SIZE = 32  # px — title bar logo display size
@@ -54,7 +54,6 @@ class TitleBar(QWidget):
             )
             icon_label.setPixmap(pix)
         icon_label.setFixedSize(_ICON_SIZE, _ICON_SIZE)
-        icon_label.setStyleSheet("background: transparent;")
         layout.addWidget(icon_label)
         layout.addSpacing(8)
 
@@ -62,26 +61,25 @@ class TitleBar(QWidget):
         logo_box = QVBoxLayout()
         logo_box.setSpacing(0)
 
-        app_title = QLabel("GRAVITY NEXUS")
+        dev_mode = os.environ.get("DEV_MODE", "").lower() in ("1", "true", "yes")
+        title_text = "GRAVITY NEXUS — DEV" if dev_mode else "GRAVITY NEXUS"
+        app_title = QLabel(title_text)
         app_title.setObjectName("AppTitleLabel")
         logo_box.addWidget(app_title)
-
-        # subtitle = QLabel("EVERQUEST LOG PARSER")
-        # subtitle.setObjectName("AppSubtitleLabel")
-        # logo_box.addWidget(subtitle)
 
         layout.addLayout(logo_box)
         layout.addStretch()
 
         # Window control buttons
         for icon, obj_name, btn_type, slot in [
-            ("─", "TitleBarBtn_min", "minimize", self._on_minimize),
-            ("□", "TitleBarBtn_max", "maximize", self._on_maximize),
-            ("✕", "TitleBarBtn_cls", "close", self._on_close),
+            (QIcon(icon_pixmap(AppIcon.WINDOW_MINIMIZE)), "TitleBarBtn_min", "minimize", self._on_minimize),
+            (QIcon(icon_pixmap(AppIcon.WINDOW_MAXIMIZE)), "TitleBarBtn_max", "maximize", self._on_maximize),
+            (QIcon(icon_pixmap(AppIcon.WINDOW_CLOSE)), "TitleBarBtn_cls", "close", self._on_close),
         ]:
-            btn = QPushButton(icon)
+            btn = QPushButton()
             btn.setObjectName("TitleBarBtn")
             btn.setProperty("btnType", btn_type)
+            btn.setIcon(icon)
             btn.setFlat(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(slot)

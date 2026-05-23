@@ -11,6 +11,7 @@
 ;  Output:  installer\Output\GravityNexus_Setup_1.0.0.exe
 ; ============================================================================
 
+; VERSION — keep this in sync with app/_version.py (__version__)
 #define AppName        "Gravity Nexus"
 #define AppVersion     "1.0.0"
 #define AppPublisher   "GravityNexus"

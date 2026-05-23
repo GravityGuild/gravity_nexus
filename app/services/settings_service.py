@@ -5,25 +5,20 @@ application name "GravityNexus" (native registry on Windows).
 
 Usage::
 
-    svc = SettingsService.instance()
-    svc.settings.general.log_file_path = "/path/to/log"
+    svc = registry.get(ISettingsService)
+    svc.settings.general.log_directory = "C:/EverQuest/Logs"
     svc.save()
 """
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from PySide6.QtCore import QSettings
 
-from models.settings_model import (
-    AppSettings,
-    AppearanceSettings,
-    GeneralSettings,
-    NotificationSettings,
-    OverlaySettings,
-    ParsingSettings,
-)
+import json
+
+from models.settings_model import AppSettings
 
 log = logging.getLogger(__name__)
 
@@ -32,23 +27,17 @@ _APP = "GravityNexus"
 
 
 class SettingsService:
-    """Singleton wrapper around QSettings for typed AppSettings persistence."""
+    """Wraps QSettings for typed AppSettings persistence.
 
-    _instance: Optional["SettingsService"] = None
+    Instantiate once in the composition root (``main.py``) and register as
+    ``ISettingsService``.  Resolve via ``registry.get(ISettingsService)``
+    everywhere else.
+    """
 
     def __init__(self) -> None:
         self._q = QSettings(_ORG, _APP)
         self._settings = AppSettings()
         self.load()
-
-    # ── Singleton ──────────────────────────────────────────────────────────────
-
-    @classmethod
-    def instance(cls) -> "SettingsService":
-        """Return the global SettingsService."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -63,11 +52,16 @@ class SettingsService:
 
         # General
         q.beginGroup("general")
-        s.general.log_file_path = self._get(q, "log_file_path", s.general.log_file_path)
+        s.general.log_directory = self._get(q, "log_directory", s.general.log_directory)
         s.general.auto_start_parser = self._get(q, "auto_start_parser", s.general.auto_start_parser)
         s.general.minimize_to_tray = self._get(q, "minimize_to_tray", s.general.minimize_to_tray)
         s.general.start_with_windows = self._get(q, "start_with_windows", s.general.start_with_windows)
         s.general.check_for_updates = self._get(q, "check_for_updates", s.general.check_for_updates)
+        s.general.debug_logging = self._get(q, "debug_logging", s.general.debug_logging)
+        s.general.hardware_accelerated = self._get(q, "hardware_accelerated", s.general.hardware_accelerated)
+        s.general.reduce_update_rate_in_background = self._get(
+            q, "reduce_update_rate_in_background", s.general.reduce_update_rate_in_background
+        )
         q.endGroup()
 
         # Overlay
@@ -77,6 +71,27 @@ class SettingsService:
         s.overlay.click_through = self._get(q, "click_through", s.overlay.click_through)
         s.overlay.always_on_top = self._get(q, "always_on_top", s.overlay.always_on_top)
         s.overlay.scale = float(self._get(q, "scale", s.overlay.scale))
+        positions_raw = q.value("positions")
+        if positions_raw:
+            try:
+                loaded = json.loads(positions_raw)
+                rebuilt: dict[str, tuple[int, int, int, int]] = {}
+                for k, v in loaded.items():
+                    if len(v) >= 4:
+                        rebuilt[k] = (int(v[0]), int(v[1]), int(v[2]), int(v[3]))
+                    elif len(v) == 2:
+                        # Migrate legacy (x, y)-only entries — size will be 0 (use default)
+                        rebuilt[k] = (int(v[0]), int(v[1]), 0, 0)
+                s.overlay.positions = rebuilt
+            except Exception:
+                pass
+        q.endGroup()
+
+        # Gravity Bot
+        q.beginGroup("gravity_bot")
+        s.gravity_bot.auth_token = self._get(q, "auth_token", s.gravity_bot.auth_token)
+        s.gravity_bot.ws_enabled = self._get(q, "ws_enabled", s.gravity_bot.ws_enabled)
+        s.gravity_bot.auto_connect = self._get(q, "auto_connect", s.gravity_bot.auto_connect)
         q.endGroup()
 
         # Parsing
@@ -85,6 +100,12 @@ class SettingsService:
         s.parsing.show_pets = self._get(q, "show_pets", s.parsing.show_pets)
         s.parsing.show_totals = self._get(q, "show_totals", s.parsing.show_totals)
         s.parsing.update_interval_ms = int(self._get(q, "update_interval_ms", s.parsing.update_interval_ms))
+        enabled_raw = q.value("enabled_matchers")
+        if enabled_raw:
+            try:
+                s.parsing.enabled_matchers = json.loads(enabled_raw)
+            except Exception:
+                pass
         q.endGroup()
 
         # Notifications
@@ -102,11 +123,34 @@ class SettingsService:
         s.appearance.use_orbitron_headings = self._get(q, "use_orbitron_headings", s.appearance.use_orbitron_headings)
         q.endGroup()
 
+        # Toolbar
+        q.beginGroup("toolbar")
+        s.toolbar.enabled = self._get(q, "enabled", s.toolbar.enabled)
+        s.toolbar.collapsed = self._get(q, "collapsed", s.toolbar.collapsed)
+        s.toolbar.orientation = self._get(q, "orientation", s.toolbar.orientation)
+        keys_raw = q.value("button_keys")
+        if keys_raw:
+            try:
+                s.toolbar.button_keys = json.loads(keys_raw)
+            except Exception:
+                pass
+        q.endGroup()
+
+        # Feature Flags
+        q.beginGroup("feature_flags")
+        flags_raw = q.value("flags")
+        if flags_raw:
+            try:
+                s.feature_flags.flags = json.loads(flags_raw)
+            except Exception:
+                pass
+        q.endGroup()
+
         # Top-level
-        s.active_profile = self._get(q, "active_profile", s.active_profile)
         geom = q.value("window_geometry")
         if geom is not None:
             s.window_geometry = bytes(geom)
+        s.setup_wizard_completed = self._get(q, "setup_wizard_completed", s.setup_wizard_completed)
 
         log.debug("Settings loaded from %s", self._q.fileName())
 
@@ -116,11 +160,14 @@ class SettingsService:
         s = self._settings
 
         q.beginGroup("general")
-        q.setValue("log_file_path", s.general.log_file_path)
+        q.setValue("log_directory", s.general.log_directory)
         q.setValue("auto_start_parser", s.general.auto_start_parser)
         q.setValue("minimize_to_tray", s.general.minimize_to_tray)
         q.setValue("start_with_windows", s.general.start_with_windows)
         q.setValue("check_for_updates", s.general.check_for_updates)
+        q.setValue("debug_logging", s.general.debug_logging)
+        q.setValue("hardware_accelerated", s.general.hardware_accelerated)
+        q.setValue("reduce_update_rate_in_background", s.general.reduce_update_rate_in_background)
         q.endGroup()
 
         q.beginGroup("overlay")
@@ -129,6 +176,13 @@ class SettingsService:
         q.setValue("click_through", s.overlay.click_through)
         q.setValue("always_on_top", s.overlay.always_on_top)
         q.setValue("scale", s.overlay.scale)
+        q.setValue("positions", json.dumps({k: list(v) for k, v in s.overlay.positions.items()}))
+        q.endGroup()
+
+        q.beginGroup("gravity_bot")
+        q.setValue("auth_token", s.gravity_bot.auth_token)
+        q.setValue("ws_enabled", s.gravity_bot.ws_enabled)
+        q.setValue("auto_connect", s.gravity_bot.auto_connect)
         q.endGroup()
 
         q.beginGroup("parsing")
@@ -136,6 +190,7 @@ class SettingsService:
         q.setValue("show_pets", s.parsing.show_pets)
         q.setValue("show_totals", s.parsing.show_totals)
         q.setValue("update_interval_ms", s.parsing.update_interval_ms)
+        q.setValue("enabled_matchers", json.dumps(s.parsing.enabled_matchers))
         q.endGroup()
 
         q.beginGroup("notifications")
@@ -151,8 +206,19 @@ class SettingsService:
         q.setValue("use_orbitron_headings", s.appearance.use_orbitron_headings)
         q.endGroup()
 
-        q.setValue("active_profile", s.active_profile)
+        q.beginGroup("toolbar")
+        q.setValue("enabled", s.toolbar.enabled)
+        q.setValue("collapsed", s.toolbar.collapsed)
+        q.setValue("orientation", s.toolbar.orientation)
+        q.setValue("button_keys", json.dumps(s.toolbar.button_keys))
+        q.endGroup()
+
+        q.beginGroup("feature_flags")
+        q.setValue("flags", json.dumps(s.feature_flags.flags))
+        q.endGroup()
+
         q.setValue("window_geometry", s.window_geometry)
+        q.setValue("setup_wizard_completed", s.setup_wizard_completed)
         q.sync()
         log.debug("Settings saved")
 

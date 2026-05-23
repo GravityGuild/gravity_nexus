@@ -123,6 +123,11 @@ class MockDataProvider(QObject):
     def stop(self) -> None:
         self._timer.stop()
 
+    def set_update_interval(self, ms: int) -> None:
+        """Change the update interval on the fly (takes effect immediately)."""
+        self._interval = ms
+        self._timer.setInterval(ms)
+
     def get_initial_snapshot(self) -> MockSnapshot:
         return self._build_snapshot()
 

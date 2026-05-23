@@ -19,6 +19,9 @@ class ThemedButton(QPushButton):
     VARIANT_GHOST = "ghost"
     VARIANT_DEFAULT = ""
 
+    #: Icon size (px) that visually matches the button's 12 px font.
+    ICON_SIZE: int = 18
+
     def __init__(
         self,
         text: str = "",
@@ -39,4 +42,3 @@ class ThemedButton(QPushButton):
         if style:
             style.unpolish(self)
             style.polish(self)
-

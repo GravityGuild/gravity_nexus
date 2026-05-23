@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from typing import Optional
 
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QHeaderView,
     QLineEdit,
     QProgressBar,
     QScrollArea,
+    QSlider,
     QTableWidget,
     QWidget,
 )
@@ -20,7 +22,17 @@ class ThemedComboBox(QComboBox):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setMinimumHeight(30)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        """Ignore scroll-wheel so the page scrolls instead of changing the value."""
+        event.ignore()
+
+
+class NoScrollSlider(QSlider):
+    """QSlider that ignores scroll-wheel events so they propagate to the parent scroll area."""
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
+        event.ignore()
 
 
 class ThemedLineEdit(QLineEdit):
@@ -34,7 +46,6 @@ class ThemedLineEdit(QLineEdit):
         super().__init__(parent)
         if placeholder:
             self.setPlaceholderText(placeholder)
-        self.setMinimumHeight(30)
 
 
 class ThemedScrollArea(QScrollArea):
