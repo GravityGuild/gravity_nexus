@@ -21,7 +21,7 @@ from theme.colors import ERROR, SUCCESS
 from ui.cards.settings_card import SettingsCard
 from ui.widgets.icon_label import AppIcon, icon_pixmap, inline_icon_html
 from ui.widgets.themed_button import ThemedButton
-from ui.widgets.themed_widgets import ThemedComboBox, NoScrollSlider
+from ui.widgets.themed_widgets import NoScrollSlider
 from ui.widgets.toggle_switch import ToggleSwitch
 
 
@@ -38,8 +38,6 @@ class OverlaysPage(QWidget):
     #: Emitted in real-time as the opacity slider moves (value 0.0 – 1.0).
     opacity_changed = Signal(float)
 
-    #: Emitted when the scale combo changes (value 0.75 – 2.0).
-    scale_changed = Signal(float)
 
     def __init__(
         self,
@@ -144,17 +142,6 @@ class OverlaysPage(QWidget):
         opacity_row.addWidget(self._opacity_label)
         opacity_card.add_layout(opacity_row)
 
-        # ── Card: Scale ───────────────────────────────────────────────────────
-        scale_card = SettingsCard("UI Scale", "Scale the overlay HUD elements.")
-        vl.addWidget(scale_card)
-
-        self._scale_combo = ThemedComboBox()
-        for s in ["75%", "100%", "125%", "150%", "175%", "200%"]:
-            self._scale_combo.addItem(s)
-        self._scale_combo.setCurrentText("100%")
-        self._scale_combo.currentTextChanged.connect(self._on_scale_combo_changed)
-        scale_card.add_widget(self._scale_combo)
-
         vl.addStretch()
         scroll.setWidget(settings_widget)
         outer.addWidget(scroll)
@@ -184,29 +171,6 @@ class OverlaysPage(QWidget):
         self._opacity_label.setText(f"{value}%")
         self.opacity_changed.emit(value / 100.0)
 
-    # ── Scale helpers ──────────────────────────────────────────────────────────
-
-    _SCALE_MAP: dict[str, float] = {
-        "75%": 0.75,
-        "100%": 1.0,
-        "125%": 1.25,
-        "150%": 1.50,
-        "175%": 1.75,
-        "200%": 2.0,
-    }
-    _SCALE_REVERSE: dict[float, str] = {v: k for k, v in _SCALE_MAP.items()}  # type: ignore[misc]
-
-    def _on_scale_combo_changed(self, text: str) -> None:
-        scale = self._SCALE_MAP.get(text, 1.0)
-        self.scale_changed.emit(scale)
-
-    @staticmethod
-    def _scale_to_text(scale: float) -> str:
-        """Return the nearest combo-box label for *scale*."""
-        options = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
-        nearest = min(options, key=lambda v: abs(v - scale))
-        return f"{round(nearest * 100)}%"
-
     def _load_values(self) -> None:
         ov = self._svc.settings.overlay
         self._toggle_enabled.set_checked(ov.enabled, animated=False)
@@ -215,7 +179,6 @@ class OverlaysPage(QWidget):
         pct = int(ov.opacity * 100)
         self._opacity_slider.setValue(pct)
         self._opacity_label.setText(f"{pct}%")
-        self._scale_combo.setCurrentText(self._scale_to_text(ov.scale))
 
     def _save(self) -> None:
         ov = self._svc.settings.overlay
@@ -223,7 +186,6 @@ class OverlaysPage(QWidget):
         ov.always_on_top = self._toggle_always_top.is_checked()
         ov.click_through = self._toggle_click_through.is_checked()
         ov.opacity = self._opacity_slider.value() / 100.0
-        ov.scale = self._SCALE_MAP.get(self._scale_combo.currentText(), 1.0)
         self._svc.save()
 
     def _reset(self) -> None:

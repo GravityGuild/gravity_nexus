@@ -156,6 +156,10 @@ QWidget {{
     padding: 6px 10px;
 }}
 #ParseStatusLabel {{ color: {ts}; font-size: {sz[FontSize.SMALL]}px; }}
+#ProfileUsername  {{ color: {tp}; font-size: {sz[FontSize.SMALL]}px; }}
+#ProfilePopupHeader {{ color: {ts}; font-size: {sz[FontSize.SMALL]}px; }}
+#ProfilePopupName   {{ color: {tp}; font-size: {sz[FontSize.MEDIUM]}px; font-weight: bold; }}
+#ProfilePopupSep    {{ background: rgba(87, 199, 255, 30); }}
 /* ═══ STATUS BAR ═══════════════════════════════════════════════════════════ */
 #StatusBar {{
     background: rgba(8, 17, 32, 200);

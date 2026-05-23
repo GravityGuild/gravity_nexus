@@ -6,6 +6,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QPlainTextEdit,
     QSizePolicy,
@@ -41,27 +42,30 @@ class RaidSubmitOverlay(BaseOverlayWindow):
 
     def __init__(
         self,
-        raw_lines: list[str],
+        raw_names: list[str],
+        full_who_log: str,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__("Raid Log Detected", parent)
-        self._lines = raw_lines
+        self._raw_names = raw_names
+        self._full_who_log = full_who_log
         self._seconds_left = _TIMEOUT_SECS
         self._submitted = False
         self._timer: Optional[QTimer] = None
 
         self._build_content()
         self._wire_submit_result()
+        self._fetch_raids()
         self._start_countdown()
 
-        self.resize(500, 360)
+        self.resize(500, 420)
 
     # ── Content construction ───────────────────────────────────────────────────
 
     def _build_content(self) -> None:
         # ── Line-count badge ──────────────────────────────────────────────────
         badge = ThemedLabel(
-            f"  {len(self._lines)} lines captured  ",
+            f"  {len(self._raw_names)} lines captured  ",
             font_size=FontSize.SMALL,
             color_role=ColorRole.ACCENT_ALT,
         )
@@ -82,8 +86,21 @@ class RaidSubmitOverlay(BaseOverlayWindow):
         self._preview = QPlainTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setFixedHeight(130)
-        self._preview.setPlainText("\n".join(self._lines[:20]))
+        self._preview.setPlainText("\n".join(self._raw_names[:20]))
         self.content_layout.addWidget(self._preview)
+
+        # ── Raid selector ─────────────────────────────────────────────────────
+        raid_lbl = ThemedLabel(
+            "Select Raid:",
+            font_size=FontSize.MEDIUM,
+            color_role=ColorRole.TEXT_SECONDARY,
+        )
+        self.content_layout.addWidget(raid_lbl)
+
+        self._raid_combo = QComboBox()
+        self._raid_combo.addItem("Loading raids…")
+        self._raid_combo.setEnabled(False)
+        self.content_layout.addWidget(self._raid_combo)
 
         # ── Status label (empty initially) ────────────────────────────────────
         self._status_lbl = ThemedLabel("", font_size=FontSize.MEDIUM)
@@ -122,6 +139,70 @@ class RaidSubmitOverlay(BaseOverlayWindow):
 
         registry.get(IGravityBotService).submit_result.connect(self._on_submit_result)
 
+    def _fetch_raids(self) -> None:
+        import time as _time
+        from core.registry import registry
+        from services.protocols import IGravityBotService
+
+        self._fetch_raids_t0 = _time.perf_counter()
+        log.debug("fetch_raids requested at t=0")
+        svc = registry.get(IGravityBotService)
+        svc.raids_fetched.connect(self._on_raids_fetched)
+        svc.fetch_raids()
+
+    def _on_raids_fetched(self, success: bool, body: str) -> None:
+        import json as _json
+        import time as _time
+
+        t_start = _time.perf_counter()
+        t0 = getattr(self, "_fetch_raids_t0", t_start)
+        log.info("_on_raids_fetched: entered  wall=%.1f ms  body=%d bytes", (t_start - t0) * 1000, len(body))
+
+        self._raid_combo.clear()
+        if not success:
+            self._raid_combo.addItem("Failed to load raids")
+            return
+
+        t_parse0 = _time.perf_counter()
+        try:
+            raids = _json.loads(body).get("raids", [])
+        except Exception:
+            self._raid_combo.addItem("Failed to load raids")
+            return
+        t_parse1 = _time.perf_counter()
+        log.debug("  json.loads: %.2f ms  (%d raids)", (t_parse1 - t_parse0) * 1000, len(raids))
+
+        # Suppress per-item repaints — a translucent overlay repaints the entire
+        # window on every model change, so batching matters with many raids.
+        t_combo0 = _time.perf_counter()
+        self.setUpdatesEnabled(False)
+        try:
+            for raid in raids:
+                mm_dd = raid["raid_date"][5:10]  # "YYYY-MM-DD ..." → "MM-DD"
+                self._raid_combo.addItem(f"{mm_dd} {raid['target']}", raid["channel_id"])
+        finally:
+            self.setUpdatesEnabled(True)
+        t_combo1 = _time.perf_counter()
+        log.debug("  addItem loop: %.2f ms", (t_combo1 - t_combo0) * 1000)
+
+        t_enable0 = _time.perf_counter()
+        if raids:
+            self._raid_combo.setEnabled(True)
+        else:
+            self._raid_combo.addItem("No unsubmitted raids")
+        t_enable1 = _time.perf_counter()
+        log.debug("  setEnabled: %.2f ms", (t_enable1 - t_enable0) * 1000)
+
+        log.info(
+            "raids dropdown populated: %d items  total=%.1f ms"
+            "  (parse=%.1f  addItems=%.1f  setEnabled=%.1f)",
+            len(raids),
+            (t_enable1 - t_start) * 1000,
+            (t_parse1 - t_parse0) * 1000,
+            (t_combo1 - t_combo0) * 1000,
+            (t_enable1 - t_enable0) * 1000,
+        )
+
     # ── Countdown ──────────────────────────────────────────────────────────────
 
     def _start_countdown(self) -> None:
@@ -149,6 +230,11 @@ class RaidSubmitOverlay(BaseOverlayWindow):
             )
             return
 
+        channel_id = self._raid_combo.currentData()
+        if channel_id is None:
+            self._set_status("⚠  Please select a raid first", ColorRole.ERROR)
+            return
+
         self._submit_btn.setEnabled(False)
         self._dismiss_btn.setEnabled(False)
         if self._timer:
@@ -157,8 +243,8 @@ class RaidSubmitOverlay(BaseOverlayWindow):
 
         self._set_status("Submitting…", ColorRole.ACCENT_PRIMARY)
         self._submitted = True
-        self.submitted.emit(self._lines)
-        svc.submit_raid_log(self._lines)
+        self.submitted.emit(self._raw_names)
+        svc.submit_raid_log(int(channel_id), self._full_who_log)
 
     def _on_submit_result(self, success: bool, message: str) -> None:
         if not self._submitted:
@@ -190,9 +276,9 @@ class RaidSubmitOverlay(BaseOverlayWindow):
             from core.registry import registry
             from services.protocols import IGravityBotService
 
-            registry.get(IGravityBotService).submit_result.disconnect(
-                self._on_submit_result
-            )
+            svc = registry.get(IGravityBotService)
+            svc.submit_result.disconnect(self._on_submit_result)
+            svc.raids_fetched.disconnect(self._on_raids_fetched)
         except RuntimeError:
             pass
         self.dismissed.emit()

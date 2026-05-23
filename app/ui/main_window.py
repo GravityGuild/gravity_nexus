@@ -41,6 +41,7 @@ from ui.pages import (
     AdvancedPage,
     AppearancePage,
     FakeLogPage,
+    FeatureFlagsPage,
     GeneralPage,
     GravityBotPage,
     NotificationsPage,
@@ -55,8 +56,15 @@ from ui.titlebar import TitleBar
 class MainWindow(QWidget):
     """Application main window — frameless with translucent drop shadow."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        auth=None,      # AuthManager | None
+        api=None,       # ApiClient | None
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
+        self._auth = auth
+        self._api = api
         self._svc = registry.get(ISettingsService)
         self._mock_provider = MockDataProvider(update_interval_ms=2000)
         self._parser_svc = registry.get(ILogParserService)
@@ -83,6 +91,7 @@ class MainWindow(QWidget):
 
         self._build_ui()
         self._connect_signals()
+        self._init_auth_state()
         self._restore_geometry()
         self._show_toolbar_overlay()
 
@@ -139,17 +148,18 @@ class MainWindow(QWidget):
         """Create and register all page widgets in the QStackedWidget."""
         self._general_page = GeneralPage()
         self._overlays_page = OverlaysPage(self._mock_provider)
+        self._parsing_page = ParsingPage()
         pages = [
-            self._general_page,
-            self._overlays_page,
-            ParsingPage(),
-            NotificationsPage(),
-            AppearancePage(),
-            AdvancedPage(),
-            GravityBotPage(),
-            FakeLogPage(self._fake_log_svc),
-            AboutPage(),
-
+            self._general_page,       # 0
+            self._overlays_page,      # 1
+            self._parsing_page,       # 2
+            NotificationsPage(),      # 3
+            AppearancePage(),         # 4
+            AdvancedPage(),           # 5
+            GravityBotPage(),         # 6
+            FakeLogPage(self._fake_log_svc),  # 7  (Dev Tools in nav)
+            FeatureFlagsPage(),       # 8
+            AboutPage(),              # 9
         ]
         for page in pages:
             self._stack.addWidget(page)
@@ -158,6 +168,12 @@ class MainWindow(QWidget):
 
     def _connect_signals(self) -> None:
         self._sidebar.page_requested.connect(self._stack.setCurrentIndex)
+
+        if self._auth is not None:
+            self._auth.session_expired.connect(self._on_session_expired)
+            self._auth.logged_in.connect(self._on_logged_in)
+            self._auth.logged_out.connect(self._sidebar.clear_user)
+            self._sidebar.logout_requested.connect(self._auth.logout)
 
         # Log parser
         self._parser_svc.status_changed.connect(self._on_parser_status_changed)
@@ -171,19 +187,37 @@ class MainWindow(QWidget):
         self._general_page.start_parser_requested.connect(self._on_start_parser_requested)
 
         # Sidebar parser controls
-        self._sidebar.start_parser_requested.connect(self._on_sidebar_start_parser)
-        self._sidebar.stop_parser_requested.connect(self._parser_svc.stop)
+        self._parsing_page.start_parser_requested.connect(self._on_sidebar_start_parser)
+        self._parsing_page.stop_parser_requested.connect(self._parser_svc.stop)
 
         # Overlay positioning
         self._overlays_page.position_overlays_requested.connect(self._on_position_overlays_requested)
         self._overlays_page.cancel_position_overlays_requested.connect(self._cancel_positioning_overlays)
         self._overlays_page.opacity_changed.connect(self._on_overlay_opacity_changed)
-        self._overlays_page.scale_changed.connect(self._on_overlay_scale_changed)
 
         # Background throttling — reduce update rates when the app loses focus
         app = QApplication.instance()
         if app is not None:
             app.applicationStateChanged.connect(self._on_app_state_changed)
+
+    # ── Auth ───────────────────────────────────────────────────────────────────
+
+    def _init_auth_state(self) -> None:
+        if self._auth and self._auth.is_authenticated() and self._auth._username:
+            self._sidebar.set_user(self._auth._username)
+
+    @Slot()
+    def _on_logged_in(self) -> None:
+        if self._auth and self._auth._username:
+            self._sidebar.set_user(self._auth._username)
+
+    @Slot()
+    def _on_session_expired(self) -> None:
+        from PySide6.QtWidgets import QDialog as _QDialog  # noqa: PLC0415
+        from ui.login_dialog import LoginDialog             # noqa: PLC0415
+        dialog = LoginDialog(self._auth, registry.get(ISettingsService), self)
+        if dialog.exec() != _QDialog.DialogCode.Accepted:
+            QApplication.quit()
 
     # ── Parser / overlay handlers ──────────────────────────────────────────────
 
@@ -214,7 +248,7 @@ class MainWindow(QWidget):
         """Called when the parser locks onto a (new) log file."""
         self._active_character = character
         self._status_bar.set_parser_running(True, character)
-        self._sidebar.set_parser_status(True, character)
+        self._parsing_page.set_parser_status(True, character)
         self._general_page.update_parser_status(True, character)
 
     def _on_parser_status_changed(self, status: str) -> None:
@@ -223,10 +257,12 @@ class MainWindow(QWidget):
         self._active_character = ""
         running = False
         self._status_bar.set_parser_running(running)
-        self._sidebar.set_parser_status(running)
+        self._parsing_page.set_parser_status(running)
         self._general_page.update_parser_status(running)
 
-    def _on_raid_dump_detected(self, raw_lines: list[str]) -> None:
+    def _on_raid_dump_detected(self, arg_vals: list) -> None:
+        raw_lines = arg_vals[0]
+        full_who_log: str = arg_vals[1]
         """Show (or replace) the raid submit overlay."""
         if self._raid_overlay is not None:
             try:
@@ -234,7 +270,7 @@ class MainWindow(QWidget):
             except RuntimeError:
                 pass
 
-        self._raid_overlay = RaidSubmitOverlay(raw_lines)
+        self._raid_overlay = RaidSubmitOverlay(raw_names=raw_lines, full_who_log=full_who_log)
         self._raid_overlay.dismissed.connect(self._on_raid_overlay_dismissed)
 
         # Apply saved opacity and scale
@@ -280,25 +316,6 @@ class MainWindow(QWidget):
         for w in self._positioning_overlays:
             try:
                 w.set_overlay_opacity(opacity)
-            except RuntimeError:
-                pass
-
-    @Slot(float)
-    def _on_overlay_scale_changed(self, scale: float) -> None:
-        """Apply the new scale to all currently visible overlay windows."""
-        if self._raid_overlay is not None:
-            try:
-                self._raid_overlay.set_overlay_scale(scale)
-            except RuntimeError:
-                pass
-        if self._toolbar_overlay is not None:
-            try:
-                self._toolbar_overlay.set_overlay_scale(scale)
-            except RuntimeError:
-                pass
-        for w in self._positioning_overlays:
-            try:
-                w.set_overlay_scale(scale)
             except RuntimeError:
                 pass
 
@@ -401,7 +418,10 @@ class MainWindow(QWidget):
     # ── Quick toolbar overlay ──────────────────────────────────────────────────
 
     def _show_toolbar_overlay(self) -> None:
-        """Instantiate and show the Quick Toolbar if toolbar.enabled."""
+        """Instantiate and show the Quick Toolbar if toolbar.enabled and the feature flag is on."""
+        from feature_flags import feature_enabled  # noqa: PLC0415
+        if not feature_enabled("quick_toolbar", self._svc.settings):
+            return
         if not self._svc.settings.toolbar.enabled:
             return
 
@@ -471,6 +491,8 @@ class MainWindow(QWidget):
         self._parser_svc.stop()
         self._bot_svc.shutdown()
         self._fake_log_svc.stop()
+        if self._api is not None:
+            self._api.close()
         if self._toolbar_overlay is not None:
             try:
                 self._toolbar_overlay.close()

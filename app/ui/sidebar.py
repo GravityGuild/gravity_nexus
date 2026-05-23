@@ -1,11 +1,13 @@
 """Sidebar — navigation panel with animated buttons and status display."""
 from __future__ import annotations
 
+import os
 from typing import Optional
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, Qt, Signal
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -22,17 +24,22 @@ from theme.colors import (
 from ui.widgets.icon_label import AppIcon, icon_pixmap
 
 
-# Navigation item definitions: (label, icon, page_index)
-NAV_ITEMS: list[tuple[str, AppIcon, int]] = [
-    ("General",       AppIcon.HOME,                    0),
-    ("Overlays",      AppIcon.MONITOR_DASHBOARD,       1),
-    ("Parsing",       AppIcon.APPLICATION_BRACKETS,    2),
-    ("Notifications", AppIcon.BELL,                    3),
-    ("Appearance",    AppIcon.PALETTE,                 4),
-    ("Advanced",      AppIcon.HAMMER_WRENCH,           5),
-    ("Gravity Bot",   AppIcon.ROBOT,                   6),
-    ("Dev Tools",     AppIcon.TEST_TUBE,               7),
-    ("About",         AppIcon.INFORMATION,             8),
+# Navigation item definitions: (label, icon, page_index, feature_flag_key | None)
+# Items with a feature_flag_key are hidden unless that flag is enabled in settings.
+# Items with label in _DEV_ONLY_LABELS are additionally hidden unless DEV_MODE=1.
+_DEV_ONLY_LABELS: frozenset[str] = frozenset({"Dev Tools", "Feature Flags"})
+
+NAV_ITEMS: list[tuple[str, AppIcon, int, str | None]] = [
+    ("General",        AppIcon.HOME,                    0, None),
+    ("Overlays",       AppIcon.MONITOR_DASHBOARD,       1, None),
+    ("Parsing",        AppIcon.APPLICATION_BRACKETS,    2, None),
+    ("Notifications",  AppIcon.BELL,                    3, "notifications_page"),
+    ("Appearance",     AppIcon.PALETTE,                 4, None),
+    ("Advanced",       AppIcon.HAMMER_WRENCH,           5, None),
+    ("Gravity Bot",    AppIcon.ROBOT,                   6, None),
+    ("Dev Tools",      AppIcon.TEST_TUBE,               7, None),
+    ("Feature Flags",  AppIcon.CODE_BRACES,             8, None),
+    ("About",          AppIcon.INFORMATION,             9, None),
 ]
 
 
@@ -195,8 +202,7 @@ class Sidebar(QWidget):
     """Left sidebar with logo, navigation, and parser status."""
 
     page_requested = Signal(int)
-    start_parser_requested = Signal()   # MainWindow reads directory from settings
-    stop_parser_requested = Signal()
+    logout_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -205,9 +211,15 @@ class Sidebar(QWidget):
 
         self._nav_buttons: list[NavButton] = []
         self._active_index = 0
+        self._current_username: Optional[str] = None
+        self._popup: Optional[_ProfilePopup] = None
+        self._popup_visible_at_press = False
 
         self._build_ui()
         self._select(0)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
     # ── UI ─────────────────────────────────────────────────────────────────────
 
@@ -220,7 +232,7 @@ class Sidebar(QWidget):
         # layout.addSpacing(8)
         layout.addWidget(self._build_nav_section())
         layout.addStretch()
-        layout.addWidget(self._build_status())
+        layout.addWidget(self._build_profile_section())
         layout.addSpacing(8)
 
     def _build_logo(self) -> QWidget:
@@ -251,7 +263,17 @@ class Sidebar(QWidget):
         nav_label.setObjectName("SidebarSectionLabel")
         vl.addWidget(nav_label)
 
-        for label, icon, page_idx in NAV_ITEMS:
+        from core.registry import registry                          # noqa: PLC0415
+        from feature_flags import feature_enabled                   # noqa: PLC0415
+        from services.protocols import ISettingsService             # noqa: PLC0415
+
+        dev_mode = os.environ.get("DEV_MODE", "").lower() in ("1", "true", "yes")
+        settings = registry.get(ISettingsService).settings
+        for label, icon, page_idx, flag_key in NAV_ITEMS:
+            if label in _DEV_ONLY_LABELS and not dev_mode:
+                continue
+            if flag_key and not feature_enabled(flag_key, settings):
+                continue
             btn = NavButton(label, icon)
             btn.clicked.connect(lambda checked=False, idx=page_idx: self._on_nav_clicked(idx))
             self._nav_buttons.append(btn)
@@ -259,41 +281,48 @@ class Sidebar(QWidget):
 
         return container
 
-    def _build_status(self) -> QWidget:
-        status_widget = QWidget()
-        status_widget.setObjectName("ParseStatusWidget")
-        vl = QVBoxLayout(status_widget)
-        vl.setContentsMargins(16, 10, 12, 10)
-        vl.setSpacing(6)
+    def _build_profile_section(self) -> QWidget:
+        self._profile_section = _ProfileSection()
+        self._profile_section.clicked.connect(self._on_profile_clicked)
+        return self._profile_section
 
-        label = QLabel("PARSER STATUS")
-        label.setObjectName("ParseStatusLabel")
-        vl.addWidget(label)
+    def eventFilter(self, obj, event: QEvent) -> bool:  # noqa: ANN001
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and isinstance(event, QMouseEvent)
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            section_rect = QRect(
+                self._profile_section.mapToGlobal(QPoint(0, 0)),
+                self._profile_section.size(),
+            )
+            if section_rect.contains(event.globalPosition().toPoint()):
+                self._popup_visible_at_press = (
+                    self._popup is not None and self._popup.isVisible()
+                )
+        return False
 
-        # Status indicator row
-        hl = QHBoxLayout()
-        self._status_dot = _StatusDot("offline")
-        hl.addWidget(self._status_dot)
-        self._status_text = QLabel("Not running")
-        self._status_text.setObjectName("StatusBarText")
-        hl.addWidget(self._status_text)
-        hl.addStretch()
-        vl.addLayout(hl)
+    def _on_profile_clicked(self) -> None:
+        if self._popup_visible_at_press:
+            self._popup_visible_at_press = False
+            return
+        self._popup = _ProfilePopup(self._current_username)
+        self._popup.logout_clicked.connect(self.logout_requested)
+        self._popup.setFixedWidth(self.width())
+        self._popup.adjustSize()
+        global_pos = self._profile_section.mapToGlobal(QPoint(0, 0))
+        self._popup.move(global_pos.x(), global_pos.y() - self._popup.height() - 4)
+        self._popup.show()
 
-        # Single start/stop toggle button
-        from ui.widgets.themed_button import ThemedButton  # noqa: PLC0415
-        self._parser_btn = ThemedButton("▶  Start Parser", ThemedButton.VARIANT_PRIMARY)
-        self._parser_btn.clicked.connect(self._on_parser_btn_clicked)
-        vl.addWidget(self._parser_btn)
+    # ── Public API (auth) ──────────────────────────────────────────────────────
 
-        self._parser_running = False
-        return status_widget
+    def set_user(self, username: str) -> None:
+        self._current_username = username
+        self._profile_section.set_user(username)
 
-    def _on_parser_btn_clicked(self) -> None:
-        if self._parser_running:
-            self.stop_parser_requested.emit()
-        else:
-            self.start_parser_requested.emit()
+    def clear_user(self) -> None:
+        self._current_username = None
+        self._profile_section.clear_user()
 
     # ── Slots ──────────────────────────────────────────────────────────────────
 
@@ -310,21 +339,6 @@ class Sidebar(QWidget):
 
     def set_active_page(self, index: int) -> None:
         self._select(index)
-
-    def set_parser_status(self, running: bool, log_name: str = "") -> None:
-        self._parser_running = running
-        if running:
-            self._status_dot.set_status("online")
-            self._status_text.setText(log_name or "Running")
-            self._parser_btn.setText("■  Stop Parser")
-            self._parser_btn.setProperty("variant", "danger")
-        else:
-            self._status_dot.set_status("offline")
-            self._status_text.setText("Not running")
-            self._parser_btn.setText("▶  Start Parser")
-            self._parser_btn.setProperty("variant", "primary")
-        self._parser_btn.style().unpolish(self._parser_btn)
-        self._parser_btn.style().polish(self._parser_btn)
 
 
 class _StatusDot(QWidget):
@@ -345,4 +359,151 @@ class _StatusDot(QWidget):
         p.setBrush(QColor(*rgb, 200))
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(1, 1, 6, 6)
+        p.end()
+
+
+class _AvatarWidget(QWidget):
+    """Circle with the user's first initial."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._letter = "?"
+        self.setFixedSize(32, 32)
+
+    def set_letter(self, letter: str) -> None:
+        self._letter = letter.upper() if letter else "?"
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: ANN001
+        from theme.colors import ACCENT_CYAN_RGB, TEXT_PRIMARY_RGB  # noqa: PLC0415
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QColor(*ACCENT_CYAN_RGB, 50))
+        p.setPen(QColor(*ACCENT_CYAN_RGB, 160))
+        p.drawEllipse(1, 1, 29, 29)
+        font = self.font()
+        font.setPointSize(12)
+        p.setFont(font)
+        p.setPen(QColor(*TEXT_PRIMARY_RGB))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._letter)
+        p.end()
+
+
+class _ProfileSection(QWidget):
+    """Clickable profile row at the bottom of the sidebar."""
+
+    clicked = Signal()
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._hover = False
+        self._pressed = False
+        self.setFixedHeight(52)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        hl = QHBoxLayout(self)
+        hl.setContentsMargins(14, 0, 14, 0)
+        hl.setSpacing(10)
+
+        self._avatar = _AvatarWidget()
+        self._avatar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        hl.addWidget(self._avatar)
+
+        self._name_lbl = QLabel("Not signed in")
+        self._name_lbl.setObjectName("ProfileUsername")
+        self._name_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        hl.addWidget(self._name_lbl, 1)
+
+    def set_user(self, username: str) -> None:
+        self._name_lbl.setText(username)
+        self._avatar.set_letter(username[0] if username else "?")
+
+    def clear_user(self) -> None:
+        self._name_lbl.setText("Not signed in")
+        self._avatar.set_letter("?")
+
+    def enterEvent(self, event) -> None:  # noqa: ANN001
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: ANN001
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: ANN001
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: ANN001
+        if event.button() == Qt.MouseButton.LeftButton and self._pressed:
+            self._pressed = False
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: ANN001
+        from theme.colors import ACCENT_CYAN_RGB  # noqa: PLC0415
+        p = QPainter(self)
+        r = self.rect()
+        if self._hover:
+            p.fillRect(r, QColor(*ACCENT_CYAN_RGB, 18))
+        p.setPen(QColor(*ACCENT_CYAN_RGB, 25))
+        p.drawLine(0, 0, r.width(), 0)
+        p.end()
+
+
+class _ProfilePopup(QWidget):
+    """Floating panel shown above the profile row when clicked."""
+
+    logout_clicked = Signal()
+
+    def __init__(self, username: Optional[str]) -> None:
+        super().__init__(None, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._build_ui(username)
+
+    def _build_ui(self, username: Optional[str]) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 12)
+        layout.setSpacing(6)
+
+        if username:
+            header = QLabel("Signed in as")
+            header.setObjectName("ProfilePopupHeader")
+            layout.addWidget(header)
+
+            name_lbl = QLabel(username)
+            name_lbl.setObjectName("ProfilePopupName")
+            layout.addWidget(name_lbl)
+        else:
+            name_lbl = QLabel("Not signed in")
+            name_lbl.setObjectName("ProfilePopupHeader")
+            layout.addWidget(name_lbl)
+
+        if username:
+            sep = QWidget()
+            sep.setObjectName("ProfilePopupSep")
+            sep.setFixedHeight(1)
+            layout.addSpacing(6)
+            layout.addWidget(sep)
+            layout.addSpacing(4)
+
+            from ui.widgets.themed_button import ThemedButton  # noqa: PLC0415
+            logout_btn = ThemedButton("Log Out", ThemedButton.VARIANT_DANGER)
+            logout_btn.clicked.connect(self._on_logout)
+            layout.addWidget(logout_btn)
+
+    def _on_logout(self) -> None:
+        self.close()
+        self.logout_clicked.emit()
+
+    def paintEvent(self, event) -> None:  # noqa: ANN001
+        from theme.colors import CARD_BG_RGB, ACCENT_CYAN_RGB  # noqa: PLC0415
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QColor(*CARD_BG_RGB, 252))
+        p.setPen(QColor(*ACCENT_CYAN_RGB, 65))
+        p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
         p.end()

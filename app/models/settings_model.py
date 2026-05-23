@@ -61,7 +61,6 @@ class AppearanceSettings:
 class GravityBotSettings:
     """Settings for Gravity Bot integration."""
 
-    bot_url: str = ""       # e.g. "https://bot.gravityguild.com"
     auth_token: str = ""    # plain bearer token (no "Bearer " prefix)
     ws_enabled: bool = True  # enable WebSocket connection thread
     auto_connect: bool = False  # connect automatically on app start
@@ -78,6 +77,14 @@ class ToolbarSettings:
 
 
 @dataclass
+class FeatureFlagsSettings:
+    """Persisted on/off state for in-development feature flags."""
+
+    #: Maps feature key → enabled.  Missing keys fall back to the flag's registered default.
+    flags: dict[str, bool] = field(default_factory=dict)
+
+
+@dataclass
 class AppSettings:
     """Top-level settings container — one per application instance."""
 
@@ -88,5 +95,7 @@ class AppSettings:
     appearance: AppearanceSettings = field(default_factory=AppearanceSettings)
     gravity_bot: GravityBotSettings = field(default_factory=GravityBotSettings)
     toolbar: ToolbarSettings = field(default_factory=ToolbarSettings)
+    feature_flags: FeatureFlagsSettings = field(default_factory=FeatureFlagsSettings)
     window_geometry: bytes = field(default_factory=bytes)
+    setup_wizard_completed: bool = False
 

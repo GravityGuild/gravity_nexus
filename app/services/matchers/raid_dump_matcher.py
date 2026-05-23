@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timedelta
 from typing import Optional
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -22,6 +23,9 @@ log = logging.getLogger(__name__)
 # ── Compiled patterns ─────────────────────────────────────────────────────────
 
 # Start-of-dump marker (body after EQ timestamp is stripped)
+# When user sends /t nexusraidlog or /t nexusraidlogs start looking for logs so they can make a social in game to trigger them
+_TELL_START_TRIGGER_RE: re.Pattern = re.compile(r"^nexusraidlogs? is not online at this time\.$")
+
 _WHO_START_RE: re.Pattern = re.compile(r"^Players on EverQuest:\s*$")
 
 # Separator line e.g. "---------------------------"
@@ -59,6 +63,7 @@ class _RaidDumpAccumulator:
     def __init__(self, on_complete, parent: QObject) -> None:  # noqa: ANN001
         self._on_complete = on_complete
         self._lines: list[str] = []
+        self._full_log: str = ""
         self._timer = QTimer(parent)
         self._timer.setSingleShot(True)
         self._timer.setInterval(self._IDLE_MS)
@@ -66,6 +71,8 @@ class _RaidDumpAccumulator:
 
     def feed(self, raw_line: str) -> None:
         """Add a matching line and restart the idle countdown."""
+        self._full_log += raw_line + "\n"
+
         m = _PLAYER_RE.match(raw_line)
         if not m:
             return None
@@ -85,11 +92,13 @@ class _RaidDumpAccumulator:
     def clear(self) -> None:
         """Clear the accumulated lines and stop the timer."""
         self._lines.clear()
+        self._full_log = ""
         self._timer.stop()
 
     def flush(self) -> None:
         if self._lines:
-            self._on_complete(list(self._lines))
+            self._on_complete(list(self._lines), self._full_log)
+            self._full_log = ""
             self._lines.clear()
         self._timer.stop()
 
@@ -128,7 +137,17 @@ class RaidDumpMatcher(LogMatcher):
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._collecting = False
+        self._collection_start_time: datetime = datetime.now()
+        self._collection_timeout_seconds: int = 60
         self._accumulator = _RaidDumpAccumulator(self._on_complete, self)
+
+    @property
+    def is_collecting(self) -> bool:
+        collection_end_time = self._collection_start_time + timedelta(seconds=self._collection_timeout_seconds)
+        if datetime.now() > collection_end_time:
+            return False
+
+        return self._collecting
 
     # ── LogMatcher interface ────────────────────────────────────────────────────
 
@@ -137,16 +156,15 @@ class RaidDumpMatcher(LogMatcher):
         """Feed *event* through the state machine."""
         body = _strip_timestamp(event.raw)
 
+        if not self.is_collecting:
+            if _TELL_START_TRIGGER_RE.match(body):
+                self._start_collecting()
+
+            return
+
         # Currently collecting — look for separator, player lines, or end
         if _WHO_SEP_RE.match(body):
             return  # skip separator lines
-
-        if not self._collecting:
-            if _WHO_START_RE.match(body):
-                log.debug("Who-list dump started")
-                self._collecting = True
-                self._accumulator.clear()
-            return
 
         # Accumulate potential player lines
         self._accumulator.feed(body)
@@ -158,6 +176,12 @@ class RaidDumpMatcher(LogMatcher):
 
     # ── Internals ──────────────────────────────────────────────────────────────
 
-    def _on_complete(self, lines: list[str]) -> None:
+    def _start_collecting(self):
+        log.debug("Raid log collection started")
+        self._collection_start_time = datetime.now()
+        self._collecting = True
+        self._accumulator.clear()
+
+    def _on_complete(self, lines: list[str], full_who_log: str) -> None:
         log.info("Raid dump complete: %d lines", len(lines))
-        self.raid_dump_detected.emit(lines)
+        self.raid_dump_detected.emit([lines, full_who_log])

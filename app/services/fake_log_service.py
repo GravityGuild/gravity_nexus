@@ -40,6 +40,28 @@ _EQ_TS_FMT = "%a %b %d %H:%M:%S %Y"
 # ── Preset log-line scenarios ──────────────────────────────────────────────────
 PRESETS: dict[str, list[str]] = {
     "Raid Logs": [
+        "nexusraidlog is not online at this time.",
+        "Players on EverQuest:",
+        "---------------------------",
+        "[1 Cleric] Chealin (Dwarf) <South Qeynos Bait and Tackle>",
+        "[18 Shaman] Liyankaro (Barbarian)",
+        "[60 Warlord] Krayziefoo (Barbarian) <The Second Sons>",
+        "AFK [ANONYMOUS] Horza",
+        "[50 Necromancer] Shoza (Gnome)",
+        "[60 Virtuoso] Media (Half Elf) <The Second Sons>",
+        "[ANONYMOUS] Antheri",
+        "[5 Bard] Hoarsemule (Human) <Riot>",
+        "[ANONYMOUS] Sugarfoot  <Fuse>",
+        "[60 Warlord] Satoshibtc (Barbarian) <Gravity>",
+        "[2 Bard] Zerotone (Half Elf)",
+        "AFK [1 Warrior] Potiondealer (Human) <Dungeon Homies>",
+        "[ANONYMOUS] Ozium  <Dawn Believers>",
+        "[6 Bard] Traderpop (Half Elf)",
+        "[10 Cleric] Lillymoon (Gnome) <The Second Sons>",
+        "[5 Bard] Rurg (Human) <Gravity>",
+        "There are 16 players in East Commonlands.",
+    ],
+    "Who Logs": [
         "Players on EverQuest:",
         "---------------------------",
         "[1 Cleric] Chealin (Dwarf) <South Qeynos Bait and Tackle>",

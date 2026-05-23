@@ -13,6 +13,7 @@ Nuitka build entry point::
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -23,10 +24,15 @@ _APP_DIR = Path(__file__).resolve().parent
 if str(_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_APP_DIR))
 
+# ── Load .env from project root (if present) for local development ────────────
+# TODO: Have a way to only have this loaded for dev/local
+from dotenv import load_dotenv  # noqa: E402
+load_dotenv(_APP_DIR.parent / ".env")
+
 # ── Enable High DPI before QApplication is created ────────────────────────────
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QEventLoop, QThread, Signal
 from PySide6.QtGui import QIcon, QSurfaceFormat
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PySide6.QtWidgets import QApplication, QDialog, QSystemTrayIcon, QMenu
 
 QApplication.setHighDpiScaleFactorRoundingPolicy(
     Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -65,13 +71,14 @@ else:
 
 # ── Remaining imports (after sys.path is set) ─────────────────────────────────
 from theme.theme_manager import ThemeManager
+from ui.loading_spinner import LoadingSpinner
 from ui.main_window import MainWindow
 from utils.platform_utils import set_app_user_model_id
 from utils.resource_utils import get_asset
 
 # ── Composition root — only place that imports concrete service classes ────────
 from core.registry import registry
-from services.protocols import IGravityBotService, ILogParserService, ISettingsService
+from services.protocols import IAuthService, IGravityBotService, ILogParserService, ISettingsService
 from services.gravity_bot_service import GravityBotService
 from services.log_parser_service import LogParserService
 from services.settings_service import SettingsService
@@ -116,6 +123,42 @@ def _apply_surface_format(hw_accel: bool) -> None:
     )
 
 
+class _SilentLoginThread(QThread):
+    """Runs AuthManager.try_silent_login() off the main thread.
+
+    Keeps the Qt event loop alive during the network call so animated
+    widgets (e.g. LoadingSpinner) continue to repaint.
+    """
+
+    result = Signal(bool)
+
+    def __init__(self, auth, parent=None) -> None:
+        super().__init__(parent)
+        self._auth = auth
+
+    def run(self) -> None:
+        ok = self._auth.try_silent_login()
+        self.result.emit(ok)
+
+
+def _run_silent_login(auth) -> bool:
+    """Return try_silent_login()'s result; runs it in a background thread."""
+    outcome: list[bool] = [False]
+
+    def _capture(ok: bool) -> None:
+        outcome[0] = ok
+
+    thread = _SilentLoginThread(auth)
+    thread.result.connect(_capture)
+
+    loop = QEventLoop()
+    thread.finished.connect(loop.quit)
+    thread.start()
+    loop.exec()
+
+    return outcome[0]
+
+
 def main() -> int:
     """Application entry point. Returns exit code."""
     # Windows taskbar identity
@@ -137,13 +180,9 @@ def main() -> int:
         "Rendering backend: %s",
         "hardware (OpenGL)" if settings_svc.settings.general.hardware_accelerated else "software",
     )
+
     log_parser_svc = LogParserService()
     registry.register(ILogParserService, log_parser_svc)
-    gravity_bot_svc = GravityBotService()
-    registry.register(IGravityBotService, gravity_bot_svc)
-
-    # Forward guild-chat messages to the bot WebSocket when connected
-    log_parser_svc.guild_message.connect(gravity_bot_svc.send_guild_chat)
 
     # Apply theme before creating any windows, using the persisted font size
     ThemeManager.instance().apply(app, base_font_size_pt=settings_svc.settings.appearance.font_size)
@@ -153,13 +192,58 @@ def main() -> int:
     app_icon = QIcon(str(app_icon_path)) if app_icon_path.exists() else QIcon()
     app.setWindowIcon(app_icon)
 
-    window = MainWindow()
+    # ── Startup spinner ────────────────────────────────────────────────────────
+    spinner = LoadingSpinner()
+    spinner.show()
+    app.processEvents()
+
+    # ── Auth bootstrap ─────────────────────────────────────────────────────────
+    from auth.auth_manager import AuthManager   # noqa: PLC0415
+    from auth.api_client import ApiClient       # noqa: PLC0415
+    from ui.login_dialog import LoginDialog     # noqa: PLC0415
+
+    website_base_url = os.environ.get("EQDKP_WEBSITE_URL", "https://gravityp99.com")
+    gravity_bot_url = os.environ.get("GRAVITY_BOT_URL", "https://bot.gravityp99.com")
+    auth = AuthManager(bot_base_url=gravity_bot_url, website_base_url=website_base_url)
+    registry.register(IAuthService, auth)
+    api = ApiClient(auth, gravity_bot_url)
+
+    silent_ok = _run_silent_login(auth)
+
+    if not silent_ok:
+        spinner.close()
+        spinner = None
+        dialog = LoginDialog(auth)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            api.close()
+            sys.exit(0)
+
+    # ── First-run setup wizard ────────────────────────────────────────────────
+    if not settings_svc.settings.setup_wizard_completed:
+        if spinner is not None:
+            spinner.close()
+            spinner = None
+        from ui.setup_wizard import SetupWizard  # noqa: PLC0415
+        SetupWizard().exec()
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # Warm the connection pool — establishes TCP once so the first real request is fast
+    api.warmup_async()
+
+    # Need to run after authentication
+    gravity_bot_svc = GravityBotService(auth, api)
+    registry.register(IGravityBotService, gravity_bot_svc)
+
+    # Forward guild-chat messages to the bot WebSocket when connected
+    log_parser_svc.guild_message.connect(gravity_bot_svc.send_guild_chat)
+
+    window = MainWindow(auth=auth, api=api)
 
     # ── Auto-connect Gravity Bot if configured ────────────────────────────────
     gravity_bot_cfg = settings_svc.settings.gravity_bot
     if gravity_bot_cfg.auto_connect:
-        if gravity_bot_cfg.bot_url and gravity_bot_cfg.auth_token:
-            log.info("auto_connect=True — connecting to Gravity Bot: %s", gravity_bot_cfg.bot_url)
+        if gravity_bot_cfg.auth_token:
+            log.info("auto_connect=True — connecting to Gravity Bot")
             gravity_bot_svc.connect_bot()
         else:
             log.warning("auto_connect=True but Gravity Bot URL or token not configured — skipping")
@@ -176,6 +260,10 @@ def main() -> int:
         log.warning(
             "auto_start_parser=True but log_directory is not configured — skipping"
         )
+
+    if spinner is not None:
+        spinner.close()
+        spinner = None
 
     window.show()
 

@@ -62,6 +62,13 @@ class ILogParserService(Protocol):
     def unregister_matcher(self, matcher: LogMatcher) -> None: ...
 
 
+class IAuthService(Protocol):
+    """Authentication state and token access."""
+
+    def get_access_token(self) -> str | None: ...
+    def is_authenticated(self) -> bool: ...
+
+
 class IGravityBotService(Protocol):
     """Manages REST + WebSocket communication with Gravity Bot."""
 
@@ -69,6 +76,7 @@ class IGravityBotService(Protocol):
     connected_changed: Any      # Signal(bool)
     notification_received: Any  # Signal(BotNotification)
     submit_result: Any          # Signal(bool, str)
+    raids_fetched: Any          # Signal(bool, str) — success, json_body
 
     @property
     def is_connected(self) -> bool: ...
@@ -77,7 +85,9 @@ class IGravityBotService(Protocol):
 
     def disconnect_bot(self) -> None: ...
 
-    def submit_raid_log(self, lines: list[str]) -> None: ...
+    def fetch_raids(self) -> None: ...
+
+    def submit_raid_log(self, channel_id: int, full_who_log: str) -> None: ...
 
     def send_guild_chat(self, character: str, message: str) -> None: ...
 

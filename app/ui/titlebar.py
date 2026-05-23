@@ -1,7 +1,7 @@
 """CustomTitleBar — frameless window title bar with drag and window controls."""
 from __future__ import annotations
 
-from pathlib import Path
+import os
 from typing import Optional
 
 from PySide6.QtCore import QPoint, Qt
@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -62,7 +61,9 @@ class TitleBar(QWidget):
         logo_box = QVBoxLayout()
         logo_box.setSpacing(0)
 
-        app_title = QLabel("GRAVITY NEXUS")
+        dev_mode = os.environ.get("DEV_MODE", "").lower() in ("1", "true", "yes")
+        title_text = "GRAVITY NEXUS — DEV" if dev_mode else "GRAVITY NEXUS"
+        app_title = QLabel(title_text)
         app_title.setObjectName("AppTitleLabel")
         logo_box.addWidget(app_title)
 

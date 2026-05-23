@@ -78,15 +78,6 @@ class GravityBotPage(QWidget):
         )
         vl.addWidget(conn_card)
 
-        # Bot URL
-        url_row = QHBoxLayout()
-        url_lbl = ThemedLabel("Bot URL:")
-        url_lbl.setFixedWidth(96)
-        self._url_edit = ThemedLineEdit("https://bot.gravityp99.com")
-        url_row.addWidget(url_lbl)
-        url_row.addWidget(self._url_edit)
-        conn_card.add_layout(url_row)
-
         # Auth token (masked)
         token_row = QHBoxLayout()
         token_lbl = ThemedLabel("Auth Token:")
@@ -161,7 +152,6 @@ class GravityBotPage(QWidget):
 
     def _load_values(self) -> None:
         gb = self._svc.settings.gravity_bot
-        self._url_edit.setText(gb.bot_url)
         self._token_edit.setText(gb.auth_token)
         self._ws_toggle.set_checked(gb.ws_enabled, animated=False)
         self._auto_toggle.set_checked(gb.auto_connect, animated=False)
@@ -169,7 +159,6 @@ class GravityBotPage(QWidget):
 
     def _save(self) -> None:
         gb = self._svc.settings.gravity_bot
-        gb.bot_url = self._url_edit.text().strip()
         gb.auth_token = self._token_edit.text().strip()
         gb.ws_enabled = self._ws_toggle.is_checked()
         gb.auto_connect = self._auto_toggle.is_checked()

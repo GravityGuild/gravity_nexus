@@ -89,7 +89,6 @@ class SettingsService:
 
         # Gravity Bot
         q.beginGroup("gravity_bot")
-        s.gravity_bot.bot_url = self._get(q, "bot_url", s.gravity_bot.bot_url)
         s.gravity_bot.auth_token = self._get(q, "auth_token", s.gravity_bot.auth_token)
         s.gravity_bot.ws_enabled = self._get(q, "ws_enabled", s.gravity_bot.ws_enabled)
         s.gravity_bot.auto_connect = self._get(q, "auto_connect", s.gravity_bot.auto_connect)
@@ -137,10 +136,21 @@ class SettingsService:
                 pass
         q.endGroup()
 
+        # Feature Flags
+        q.beginGroup("feature_flags")
+        flags_raw = q.value("flags")
+        if flags_raw:
+            try:
+                s.feature_flags.flags = json.loads(flags_raw)
+            except Exception:
+                pass
+        q.endGroup()
+
         # Top-level
         geom = q.value("window_geometry")
         if geom is not None:
             s.window_geometry = bytes(geom)
+        s.setup_wizard_completed = self._get(q, "setup_wizard_completed", s.setup_wizard_completed)
 
         log.debug("Settings loaded from %s", self._q.fileName())
 
@@ -170,7 +180,6 @@ class SettingsService:
         q.endGroup()
 
         q.beginGroup("gravity_bot")
-        q.setValue("bot_url", s.gravity_bot.bot_url)
         q.setValue("auth_token", s.gravity_bot.auth_token)
         q.setValue("ws_enabled", s.gravity_bot.ws_enabled)
         q.setValue("auto_connect", s.gravity_bot.auto_connect)
@@ -204,7 +213,12 @@ class SettingsService:
         q.setValue("button_keys", json.dumps(s.toolbar.button_keys))
         q.endGroup()
 
+        q.beginGroup("feature_flags")
+        q.setValue("flags", json.dumps(s.feature_flags.flags))
+        q.endGroup()
+
         q.setValue("window_geometry", s.window_geometry)
+        q.setValue("setup_wizard_completed", s.setup_wizard_completed)
         q.sync()
         log.debug("Settings saved")
 
