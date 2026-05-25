@@ -8,12 +8,12 @@
 ;
 ;  To compile this script:
 ;      iscc installer\gravity_nexus_setup.iss
-;  Output:  installer\Output\GravityNexus_Setup_1.0.0.exe
+;  Output:  installer\Output\GravityNexus_Setup_0.1.0.exe
 ; ============================================================================
 
 ; VERSION — keep this in sync with app/_version.py (__version__)
 #define AppName        "Gravity Nexus"
-#define AppVersion     "1.0.0"
+#define AppVersion     "0.1.0"
 #define AppPublisher   "GravityNexus"
 #define AppURL         "https://github.com/GravityGuild/gravity_nexus"
 #define AppExeName     "GravityNexus.exe"
@@ -77,7 +77,7 @@ CreateUninstallRegKey=yes
 [Run]
 Filename: "{app}\{#AppExeName}"; \
     Description: "Launch {#AppName}"; \
-    Flags: nowait postinstall skipifsilent
+    Flags: nowait postinstall
 
 ; ── [Languages] ──────────────────────────────────────────────────────────────
 

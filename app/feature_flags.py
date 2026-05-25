@@ -36,6 +36,36 @@ FEATURE_REGISTRY: list[FeatureFlag] = [
         description="Show the draggable Quick Action Toolbar overlay on startup.",
         default=False,
     ),
+    FeatureFlag(
+        key="theme_selector",
+        label="Theme Selector",
+        description="Show the Theme selector card on the Appearance page.",
+        default=False,
+    ),
+    FeatureFlag(
+        key="typography_options",
+        label="Typography Options",
+        description="Show the Typography card on the Appearance page.",
+        default=False,
+    ),
+    FeatureFlag(
+        key="overlay_always_on_top",
+        label="Overlay: Always on Top",
+        description="Show the 'Always on top' toggle on the Overlays page.",
+        default=False,
+    ),
+    FeatureFlag(
+        key="overlay_click_through",
+        label="Overlay: Click-Through Mode",
+        description="Show the 'Click-through mode (Windows)' toggle on the Overlays page.",
+        default=False,
+    ),
+    FeatureFlag(
+        key="reduce_update_rate_in_background",
+        label="Reduce Update Rate in Background",
+        description="Show the 'Reduce update rate in background' toggle on the General page.",
+        default=False,
+    ),
 ]
 
 

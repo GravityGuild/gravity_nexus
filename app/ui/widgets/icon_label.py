@@ -89,6 +89,7 @@ class AppIcon(str, Enum):
     TEST_TUBE = "test-tube.svg"
     VECTOR_ARRANGE_ABOVE = "vector-arrange-above.svg"
     WINDOW_CLOSE = "window-close.svg"
+    WRENCH = "wrench.svg"
     WINDOW_MAXIMIZE = "window-maximize.svg"
     WINDOW_MINIMIZE = "window-minimize.svg"
 

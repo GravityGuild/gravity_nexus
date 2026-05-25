@@ -14,9 +14,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import json
+import keyring
+import keyring.errors
+
 from PySide6.QtCore import QSettings
 
-import json
+_BOT_KEYRING_SERVICE = "gravity_nexus"
+_BOT_KEYRING_KEY = "bot_auth_token"
+_GITHUB_KEYRING_SERVICE = "gravity_nexus"
+_GITHUB_KEYRING_KEY = "github_token"
 
 from models.settings_model import AppSettings
 
@@ -57,6 +64,8 @@ class SettingsService:
         s.general.minimize_to_tray = self._get(q, "minimize_to_tray", s.general.minimize_to_tray)
         s.general.start_with_windows = self._get(q, "start_with_windows", s.general.start_with_windows)
         s.general.check_for_updates = self._get(q, "check_for_updates", s.general.check_for_updates)
+        s.general.last_update_check_timestamp = float(self._get(q, "last_update_check_timestamp", s.general.last_update_check_timestamp))
+        s.general.update_check_interval_hours = int(self._get(q, "update_check_interval_hours", s.general.update_check_interval_hours))
         s.general.debug_logging = self._get(q, "debug_logging", s.general.debug_logging)
         s.general.hardware_accelerated = self._get(q, "hardware_accelerated", s.general.hardware_accelerated)
         s.general.reduce_update_rate_in_background = self._get(
@@ -89,10 +98,18 @@ class SettingsService:
 
         # Gravity Bot
         q.beginGroup("gravity_bot")
-        s.gravity_bot.auth_token = self._get(q, "auth_token", s.gravity_bot.auth_token)
+        if q.contains("auth_token"):  # one-time migration: clear plaintext token from registry
+            q.remove("auth_token")
         s.gravity_bot.ws_enabled = self._get(q, "ws_enabled", s.gravity_bot.ws_enabled)
         s.gravity_bot.auto_connect = self._get(q, "auto_connect", s.gravity_bot.auto_connect)
         q.endGroup()
+        stored_bot_token = keyring.get_password(_BOT_KEYRING_SERVICE, _BOT_KEYRING_KEY)
+        if stored_bot_token:
+            s.gravity_bot.auth_token = stored_bot_token
+
+        stored_github_token = keyring.get_password(_GITHUB_KEYRING_SERVICE, _GITHUB_KEYRING_KEY)
+        if stored_github_token:
+            s.general.github_token = stored_github_token
 
         # Parsing
         q.beginGroup("parsing")
@@ -106,6 +123,7 @@ class SettingsService:
                 s.parsing.enabled_matchers = json.loads(enabled_raw)
             except Exception:
                 pass
+        s.parsing.quick_raid_logs = self._get(q, "quick_raid_logs", s.parsing.quick_raid_logs)
         q.endGroup()
 
         # Notifications
@@ -165,6 +183,8 @@ class SettingsService:
         q.setValue("minimize_to_tray", s.general.minimize_to_tray)
         q.setValue("start_with_windows", s.general.start_with_windows)
         q.setValue("check_for_updates", s.general.check_for_updates)
+        q.setValue("last_update_check_timestamp", s.general.last_update_check_timestamp)
+        q.setValue("update_check_interval_hours", s.general.update_check_interval_hours)
         q.setValue("debug_logging", s.general.debug_logging)
         q.setValue("hardware_accelerated", s.general.hardware_accelerated)
         q.setValue("reduce_update_rate_in_background", s.general.reduce_update_rate_in_background)
@@ -180,10 +200,24 @@ class SettingsService:
         q.endGroup()
 
         q.beginGroup("gravity_bot")
-        q.setValue("auth_token", s.gravity_bot.auth_token)
         q.setValue("ws_enabled", s.gravity_bot.ws_enabled)
         q.setValue("auto_connect", s.gravity_bot.auto_connect)
         q.endGroup()
+        if s.gravity_bot.auth_token:
+            keyring.set_password(_BOT_KEYRING_SERVICE, _BOT_KEYRING_KEY, s.gravity_bot.auth_token)
+        else:
+            try:
+                keyring.delete_password(_BOT_KEYRING_SERVICE, _BOT_KEYRING_KEY)
+            except keyring.errors.PasswordDeleteError:
+                pass
+
+        if s.general.github_token:
+            keyring.set_password(_GITHUB_KEYRING_SERVICE, _GITHUB_KEYRING_KEY, s.general.github_token)
+        else:
+            try:
+                keyring.delete_password(_GITHUB_KEYRING_SERVICE, _GITHUB_KEYRING_KEY)
+            except keyring.errors.PasswordDeleteError:
+                pass
 
         q.beginGroup("parsing")
         q.setValue("dps_window_seconds", s.parsing.dps_window_seconds)
@@ -191,6 +225,7 @@ class SettingsService:
         q.setValue("show_totals", s.parsing.show_totals)
         q.setValue("update_interval_ms", s.parsing.update_interval_ms)
         q.setValue("enabled_matchers", json.dumps(s.parsing.enabled_matchers))
+        q.setValue("quick_raid_logs", s.parsing.quick_raid_logs)
         q.endGroup()
 
         q.beginGroup("notifications")

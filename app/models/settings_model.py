@@ -15,6 +15,9 @@ class GeneralSettings:
     minimize_to_tray: bool = True
     start_with_windows: bool = False
     check_for_updates: bool = True
+    github_token: str = ""         # stored in credential store, not plain settings
+    last_update_check_timestamp: float = 0.0
+    update_check_interval_hours: int = 24
     debug_logging: bool = False
     hardware_accelerated: bool = True
     reduce_update_rate_in_background: bool = True
@@ -40,6 +43,7 @@ class ParsingSettings:
     update_interval_ms: int = 500
     #: Maps MATCHER_KEY → enabled.  Missing keys fall back to ENABLED_BY_DEFAULT.
     enabled_matchers: dict[str, bool] = field(default_factory=dict)
+    quick_raid_logs: bool = True
 
 
 @dataclass
@@ -64,6 +68,7 @@ class GravityBotSettings:
     auth_token: str = ""    # plain bearer token (no "Bearer " prefix)
     ws_enabled: bool = True  # enable WebSocket connection thread
     auto_connect: bool = False  # connect automatically on app start
+    send_guild_chat: bool = True  # forward parsed guild chat to bot via WebSocket
 
 
 @dataclass

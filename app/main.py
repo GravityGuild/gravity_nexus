@@ -25,9 +25,9 @@ if str(_APP_DIR) not in sys.path:
     sys.path.insert(0, str(_APP_DIR))
 
 # ── Load .env from project root (if present) for local development ────────────
-# TODO: Have a way to only have this loaded for dev/local
 from dotenv import load_dotenv  # noqa: E402
-load_dotenv(_APP_DIR.parent / ".env")
+if not getattr(sys, "frozen", False):
+    load_dotenv(_APP_DIR.parent / ".env")
 
 # ── Enable High DPI before QApplication is created ────────────────────────────
 from PySide6.QtCore import Qt, QEventLoop, QThread, Signal
@@ -78,10 +78,11 @@ from utils.resource_utils import get_asset
 
 # ── Composition root — only place that imports concrete service classes ────────
 from core.registry import registry
-from services.protocols import IAuthService, IGravityBotService, ILogParserService, ISettingsService
+from services.protocols import IAuthService, IGravityBotService, ILogParserService, ISettingsService, IUpdateService
 from services.gravity_bot_service import GravityBotService
 from services.log_parser_service import LogParserService
 from services.settings_service import SettingsService
+from services.update_service import UpdateService
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -184,8 +185,15 @@ def main() -> int:
     log_parser_svc = LogParserService()
     registry.register(ILogParserService, log_parser_svc)
 
+    update_svc = UpdateService(settings_svc)
+    registry.register(IUpdateService, update_svc)
+
     # Apply theme before creating any windows, using the persisted font size
-    ThemeManager.instance().apply(app, base_font_size_pt=settings_svc.settings.appearance.font_size)
+    ThemeManager.instance().apply(
+        app,
+        base_font_size_pt=settings_svc.settings.appearance.font_size,
+        use_orbitron_headings=settings_svc.settings.appearance.use_orbitron_headings,
+    )
 
     # Set application-wide icon (taskbar, Alt+Tab, window decorations)
     app_icon_path = get_asset("icons/full_logo.ico")
@@ -227,8 +235,18 @@ def main() -> int:
         SetupWizard().exec()
     # ──────────────────────────────────────────────────────────────────────────
 
-    # Warm the connection pool — establishes TCP once so the first real request is fast
-    api.warmup_async()
+    # Warm the connection pool before the window shows so the first user-triggered
+    # request reuses a live connection (avoids DNS + TCP + TLS on the hot path).
+    # Run in a thread and pump processEvents() so the spinner stays animated.
+    import threading as _threading
+    _warmup_done = _threading.Event()
+    _threading.Thread(
+        target=lambda: (api.warmup(), _warmup_done.set()),
+        daemon=True,
+        name="api-warmup",
+    ).start()
+    while not _warmup_done.wait(timeout=0.016):  # ~60 fps pump
+        app.processEvents()
 
     # Need to run after authentication
     gravity_bot_svc = GravityBotService(auth, api)
@@ -237,29 +255,39 @@ def main() -> int:
     # Forward guild-chat messages to the bot WebSocket when connected
     log_parser_svc.guild_message.connect(gravity_bot_svc.send_guild_chat)
 
+    # Start the WS connection and block (pumping the event loop) until the
+    # handshake resolves — so the main window opens with connection status ready.
+    # connected_changed crosses the WS thread → main thread via a queued signal;
+    # it is only delivered during processEvents(), same as the warmup loop above.
+    if settings_svc.settings.gravity_bot.ws_enabled and auth.is_authenticated():
+        import time as _ws_time
+
+        if spinner is not None:
+            spinner.set_status("Connecting to Gravity Bot…")
+            app.processEvents()
+
+        _ws_resolved = _threading.Event()
+
+        def _on_ws_startup_result(_: bool) -> None:
+            _ws_resolved.set()
+
+        gravity_bot_svc.connected_changed.connect(_on_ws_startup_result)
+        gravity_bot_svc.connect_bot()
+
+        _WS_STARTUP_TIMEOUT = 12.0  # slightly beyond open_timeout=10 in _WsThread
+        _t0 = _ws_time.monotonic()
+        while not _ws_resolved.wait(timeout=0.016):
+            app.processEvents()
+            if _ws_time.monotonic() - _t0 > _WS_STARTUP_TIMEOUT:
+                log.warning("Gravity Bot WS connect timed out during startup")
+                break
+
+        gravity_bot_svc.connected_changed.disconnect(_on_ws_startup_result)
+        log.info("Gravity Bot WS startup wait complete — connected=%s", gravity_bot_svc.is_connected)
+    elif settings_svc.settings.gravity_bot.ws_enabled:
+        log.warning("ws_enabled=True but not authenticated — skipping WebSocket connect")
+
     window = MainWindow(auth=auth, api=api)
-
-    # ── Auto-connect Gravity Bot if configured ────────────────────────────────
-    gravity_bot_cfg = settings_svc.settings.gravity_bot
-    if gravity_bot_cfg.auto_connect:
-        if gravity_bot_cfg.auth_token:
-            log.info("auto_connect=True — connecting to Gravity Bot")
-            gravity_bot_svc.connect_bot()
-        else:
-            log.warning("auto_connect=True but Gravity Bot URL or token not configured — skipping")
-
-    # ── Auto-start services based on settings (after window is wired up) ──────
-    general = settings_svc.settings.general
-    if general.auto_start_parser and general.log_directory:
-        log.info(
-            "auto_start_parser=True — starting log parser for: %s",
-            general.log_directory,
-        )
-        log_parser_svc.start(general.log_directory)
-    elif general.auto_start_parser:
-        log.warning(
-            "auto_start_parser=True but log_directory is not configured — skipping"
-        )
 
     if spinner is not None:
         spinner.close()
@@ -285,6 +313,38 @@ def main() -> int:
     tray.show()
     # Store on the app instance so MainWindow can find it for balloon messages
     app.setProperty("tray_icon", tray)
+
+    # ── Update service ────────────────────────────────────────────────────────
+    update_svc.update_available.connect(
+        lambda version, _url: tray.showMessage(
+            "Gravity Nexus",
+            f"Update available: v{version}. Go to Settings → General to install.",
+            QSystemTrayIcon.MessageIcon.Information,
+            8000,
+        ) if tray.supportsMessages() else None
+    )
+    update_svc.restart_requested.connect(window.force_quit)
+    update_svc.start()
+
+    # ── Auto-start services based on settings (after window is wired up) ──────
+    general = settings_svc.settings.general
+    if general.auto_start_parser and general.log_directory:
+        log.info(
+            "auto_start_parser=True — starting log parser for: %s",
+            general.log_directory,
+        )
+        log_parser_svc.start(general.log_directory)
+    elif general.auto_start_parser:
+        log.warning(
+            "auto_start_parser=True but log_directory is not configured — skipping"
+        )
+        if tray.supportsMessages():
+            tray.showMessage(
+                "Gravity Nexus",
+                "Parser not started: no log directory configured. Go to Settings → General.",
+                QSystemTrayIcon.MessageIcon.Warning,
+                5000,
+            )
 
     log.info("Gravity Nexus started")
     return app.exec()

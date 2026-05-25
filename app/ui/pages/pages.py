@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -16,15 +16,18 @@ from PySide6.QtWidgets import (
 )
 
 from core.registry import registry
-from services.protocols import ISettingsService, ILogParserService
+from services.protocols import IAuthService, IGravityBotService, ISettingsService, ILogParserService
 from theme.spec import ColorRole, FontRole, FontSize
 from theme.theme_manager import FONT_SIZE_OPTIONS, ThemeManager
 from ui.cards.settings_card import SettingsCard
+from ui.sidebar import _StatusDot
+from ui.widgets.status_widgets import StatusIndicator
 from ui.widgets.themed_button import ThemedButton
 from ui.widgets.themed_label import ThemedLabel
 from ui.widgets.themed_widgets import ThemedComboBox
 from ui.widgets.toggle_switch import ToggleSwitch
 from _version import __version__
+from feature_flags import feature_enabled
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -157,23 +160,27 @@ class AppearancePage(QWidget):
         font_card.add_layout(btn_row)
 
         # ── Theme card ────────────────────────────────────────────────────────
-        theme_card = SettingsCard("Theme", "UI colour scheme (future releases).")
-        combo = ThemedComboBox()
-        for t in ["Cosmic (Default)", "Deep Space", "Amber Alert", "Frost"]:
-            combo.addItem(t)
-        combo.setEnabled(False)  # placeholder — themes not yet implemented
-        theme_card.add_widget(combo)
-        vl.addWidget(theme_card)
+        if feature_enabled("theme_selector", self._svc.settings):
+            theme_card = SettingsCard("Theme", "UI colour scheme (future releases).")
+            combo = ThemedComboBox()
+            for t in ["Cosmic (Default)", "Deep Space", "Amber Alert", "Frost"]:
+                combo.addItem(t)
+            combo.setEnabled(False)  # placeholder — themes not yet implemented
+            theme_card.add_widget(combo)
+            vl.addWidget(theme_card)
 
         # ── Typography card ───────────────────────────────────────────────────
-        typo_card = SettingsCard("Typography", "Additional font preferences.")
-        for label, checked in [
-            ("Use Orbitron for headings", True),
-            ("High-contrast mode", False),
-        ]:
-            row, _ = _toggle_row(label, checked)
-            typo_card.add_layout(row)
-        vl.addWidget(typo_card)
+        if feature_enabled("typography_options", self._svc.settings):
+            typo_card = SettingsCard("Typography", "Additional font preferences.")
+            orbitron_row, self._orbitron_toggle = _toggle_row(
+                "Use Orbitron for headings",
+                self._svc.settings.appearance.use_orbitron_headings,
+            )
+            typo_card.add_layout(orbitron_row)
+            contrast_row, _ = _toggle_row("High-contrast mode", False)
+            typo_card.add_layout(contrast_row)
+            vl.addWidget(typo_card)
+            self._orbitron_toggle.toggled.connect(self._on_orbitron_toggled)
 
         vl.addStretch()
 
@@ -190,6 +197,13 @@ class AppearancePage(QWidget):
         self._svc.settings.appearance.font_size = pt
         self._svc.save()
 
+    def _on_orbitron_toggled(self, enabled: bool) -> None:
+        self._svc.settings.appearance.use_orbitron_headings = enabled
+        self._svc.save()
+        app = QApplication.instance()
+        if app:
+            ThemeManager.instance().apply_orbitron_headings(app, enabled)
+
 
 # ── Advanced Page ─────────────────────────────────────────────────────────────
 
@@ -197,12 +211,59 @@ class AppearancePage(QWidget):
 class AdvancedPage(QWidget):
     """Advanced / developer settings page."""
 
+    start_parser_requested = Signal()
+    stop_parser_requested = Signal()
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("PageWrapper")
+        self._parser_running = False
         self._svc = registry.get(ISettingsService)
+        self._bot_svc = registry.get(IGravityBotService)
+        self._auth = registry.get(IAuthService)
         scroll, vl = _make_page_scroll()
         _page_header(vl, "Advanced", "Developer and power-user settings.")
+
+        # ── Card: Bot Connection ──────────────────────────────────────────────
+        conn_card = SettingsCard(
+            "Bot Connection",
+            "WebSocket connection to the Gravity Bot server.",
+        )
+        vl.addWidget(conn_card)
+
+        account_row = QHBoxLayout()
+        account_lbl = ThemedLabel("Signed in as:", color_role=ColorRole.TEXT_MUTED)
+        account_lbl.setFixedWidth(96)
+        self._account_display = ThemedLabel("", color_role=ColorRole.TEXT_PRIMARY)
+        account_row.addWidget(account_lbl)
+        account_row.addWidget(self._account_display)
+        account_row.addStretch()
+        conn_card.add_layout(account_row)
+
+        status_row = QHBoxLayout()
+        self._conn_status = StatusIndicator("Disconnected", "offline")
+        status_row.addWidget(self._conn_status)
+        status_row.addStretch()
+        conn_card.add_layout(status_row)
+
+        btn_row = QHBoxLayout()
+        self._connect_btn = ThemedButton("Connect", ThemedButton.VARIANT_PRIMARY)
+        self._disconnect_btn = ThemedButton("Disconnect", ThemedButton.VARIANT_DANGER)
+        self._disconnect_btn.setEnabled(False)
+        self._connect_btn.clicked.connect(self._on_connect)
+        self._disconnect_btn.clicked.connect(self._on_disconnect)
+        btn_row.addWidget(self._connect_btn)
+        btn_row.addWidget(self._disconnect_btn)
+        btn_row.addStretch()
+        conn_card.add_layout(btn_row)
+
+        # ── Card: Parser status ───────────────────────────────────────────────
+        parser_card = SettingsCard(
+            "Parser",
+            "View the current status of the parser and start or stop it.",
+        )
+        self._build_parser_status(parser_card)
+        vl.addWidget(parser_card)
 
         perf_card = SettingsCard("Performance", "Tuning for long-session stability.")
 
@@ -225,13 +286,16 @@ class AdvancedPage(QWidget):
         perf_card.add_widget(self._hw_restart_lbl)
 
         # Reduce update rate in background toggle
-        reduce_row, self._reduce_rate_toggle = _toggle_row("Reduce update rate in background", True)
-        perf_card.add_layout(reduce_row)
-        self._reduce_rate_toggle.toggled.connect(self._on_reduce_rate_toggled)
+        self._reduce_rate_toggle: Optional[ToggleSwitch] = None
+        if feature_enabled("reduce_update_rate_in_background", self._svc.settings):
+            reduce_row, self._reduce_rate_toggle = _toggle_row("Reduce update rate in background", True)
+            perf_card.add_layout(reduce_row)
+            self._reduce_rate_toggle.toggled.connect(self._on_reduce_rate_toggled)
         vl.addWidget(perf_card)
 
         danger_card = SettingsCard("⚠ Danger Zone", "Irreversible operations.")
         reset_btn = ThemedButton("Reset All Settings", ThemedButton.VARIANT_DANGER)
+        reset_btn.clicked.connect(self._on_reset_settings)
         danger_card.add_widget(reset_btn)
         vl.addWidget(danger_card)
 
@@ -248,9 +312,81 @@ class AdvancedPage(QWidget):
         self._hw_toggle.set_checked(
             self._svc.settings.general.hardware_accelerated, animated=False
         )
-        self._reduce_rate_toggle.set_checked(
-            self._svc.settings.general.reduce_update_rate_in_background, animated=False
-        )
+        if self._reduce_rate_toggle is not None:
+            self._reduce_rate_toggle.set_checked(
+                self._svc.settings.general.reduce_update_rate_in_background, animated=False
+            )
+
+        username = self._auth.username
+        self._account_display.setText(username if username else "Not signed in")
+        self._on_connected_changed(self._bot_svc.is_connected)
+        self._bot_svc.connected_changed.connect(self._on_connected_changed)
+
+    def _build_parser_status(self, card: SettingsCard) -> None:
+        hl_status = QHBoxLayout()
+        status_lbl = QLabel("Status")
+        status_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        hl_status.addWidget(status_lbl)
+        self._parser_status_text = QLabel("Stopped")
+        self._parser_status_text.setObjectName("StatusBarText")
+        hl_status.addWidget(self._parser_status_text)
+        self._parser_status_dot = _StatusDot("offline")
+        hl_status.addWidget(self._parser_status_dot)
+        card.add_layout(hl_status)
+
+        hl_char = QHBoxLayout()
+        char_lbl = QLabel("Character")
+        char_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        hl_char.addWidget(char_lbl)
+        self._parser_character_text = QLabel("—")
+        self._parser_character_text.setObjectName("StatusBarText")
+        hl_char.addWidget(self._parser_character_text)
+        card.add_layout(hl_char)
+
+        self._parser_btn = ThemedButton("▶  Start Parser", ThemedButton.VARIANT_PRIMARY)
+        self._parser_btn.clicked.connect(self._on_parser_btn_clicked)
+        card.add_widget(self._parser_btn)
+
+    def _on_parser_btn_clicked(self) -> None:
+        if self._parser_running:
+            self.stop_parser_requested.emit()
+        else:
+            self.start_parser_requested.emit()
+
+    def set_parser_status(self, running: bool, log_name: str = "") -> None:
+        self._parser_running = running
+        if running:
+            self._parser_status_dot.set_status("online")
+            self._parser_status_text.setText("Running")
+            self._parser_character_text.setText(log_name or "—")
+            self._parser_btn.setText("■  Stop Parser")
+            self._parser_btn.setProperty("variant", "danger")
+        else:
+            self._parser_status_dot.set_status("offline")
+            self._parser_status_text.setText("Stopped")
+            self._parser_character_text.setText("—")
+            self._parser_btn.setText("▶  Start Parser")
+            self._parser_btn.setProperty("variant", "primary")
+        self._parser_btn.style().unpolish(self._parser_btn)
+        self._parser_btn.style().polish(self._parser_btn)
+
+    def _on_connect(self) -> None:
+        self._conn_status.set_status("connecting", "Connecting…")
+        self._connect_btn.setEnabled(False)
+        self._bot_svc.connect_bot()
+
+    def _on_disconnect(self) -> None:
+        self._bot_svc.disconnect_bot()
+
+    def _on_connected_changed(self, connected: bool) -> None:
+        if connected:
+            self._conn_status.set_status("online", "Connected")
+            self._connect_btn.setEnabled(False)
+            self._disconnect_btn.setEnabled(True)
+        else:
+            self._conn_status.set_status("offline", "Disconnected")
+            self._connect_btn.setEnabled(True)
+            self._disconnect_btn.setEnabled(False)
 
     def _on_debug_logging_toggled(self, enabled: bool) -> None:
         """Apply the new debug-logging level, persist the setting, and emit a log message."""
@@ -286,6 +422,19 @@ class AdvancedPage(QWidget):
         self._svc.settings.general.reduce_update_rate_in_background = enabled
         self._svc.save()
 
+    def _on_reset_settings(self) -> None:
+        from PySide6.QtWidgets import QMessageBox  # noqa: PLC0415
+        from PySide6.QtCore import QSettings       # noqa: PLC0415
+        reply = QMessageBox.question(
+            self,
+            "Reset All Settings",
+            "All settings will be cleared and the app will close.\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            QSettings("GravityNexus", "GravityNexus").clear()
+            QApplication.quit()
+
 
 # ── About Page ────────────────────────────────────────────────────────────────
 
@@ -315,7 +464,7 @@ class AboutPage(QWidget):
             f"<li><a href='https://gravityp99.com/' style='color: {_link_color};'>Guild Website</a></li>"
             f"<li><a href='https://github.com/GravityGuild/gravity_nexus' style='color: {_link_color};'>Gravity Nexus Github</a></li>"
             f"<li><a href='https://github.com/GravityGuild/gravity_nexus/releases' style='color: {_link_color};'>Releases</a></li>"
-            f"<li><a href='https://github.com/GravityGuild/gravity_nexus' style='color: {_link_color};'>Changelog</a></li>"
+            f"<li><a href='https://github.com/GravityGuild/gravity_nexus/releases' style='color: {_link_color};'>Changelog</a></li>"
             "</ul>"
         )
         about_text.setOpenExternalLinks(True)

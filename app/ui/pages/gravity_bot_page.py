@@ -1,4 +1,4 @@
-"""GravityBotPage — connection settings for Gravity Bot integration."""
+"""GravityBotPage — WebSocket options for Gravity Bot integration."""
 from __future__ import annotations
 
 from typing import Optional
@@ -6,7 +6,6 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QLineEdit,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -14,27 +13,23 @@ from PySide6.QtWidgets import (
 )
 
 from core.registry import registry
-from services.protocols import IGravityBotService, ISettingsService
+from services.protocols import ISettingsService
 from theme.spec import ColorRole, FontRole, FontSize
 from ui.cards.settings_card import SettingsCard
-from ui.widgets.status_widgets import StatusIndicator
 from ui.widgets.themed_button import ThemedButton
 from ui.widgets.themed_label import ThemedLabel
-from ui.widgets.themed_widgets import ThemedLineEdit
 from ui.widgets.toggle_switch import ToggleSwitch
 
 
 class GravityBotPage(QWidget):
-    """Settings page for configuring and connecting to Gravity Bot."""
+    """Settings page for configuring Gravity Bot options."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("PageWrapper")
         self._svc = registry.get(ISettingsService)
-        self._bot_svc = registry.get(IGravityBotService)
         self._build_ui()
         self._load_values()
-        self._bot_svc.connected_changed.connect(self._on_connected_changed)
 
     # ── UI construction ────────────────────────────────────────────────────────
 
@@ -61,8 +56,7 @@ class GravityBotPage(QWidget):
         vl.addWidget(title)
 
         sub = ThemedLabel(
-            "Connect to the Gravity guild bot for raid log submission "
-            "and real-time notifications.",
+            "WebSocket and startup options for the Gravity Bot integration.",
             font_size=FontSize.SMALL,
             color_role=ColorRole.TEXT_SECONDARY,
             word_wrap=True,
@@ -70,51 +64,6 @@ class GravityBotPage(QWidget):
         sub.setObjectName("PageSubtitle")
         vl.addWidget(sub)
         vl.addSpacing(4)
-
-        # ── Card: Connection ──────────────────────────────────────────────────
-        conn_card = SettingsCard(
-            "Connection",
-            "Bot server address and authentication token.",
-        )
-        vl.addWidget(conn_card)
-
-        # Auth token (masked)
-        token_row = QHBoxLayout()
-        token_lbl = ThemedLabel("Auth Token:")
-        token_lbl.setFixedWidth(96)
-        self._token_edit = ThemedLineEdit("Paste your bot token here")
-        self._token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        token_row.addWidget(token_lbl)
-        token_row.addWidget(self._token_edit)
-        conn_card.add_layout(token_row)
-
-        # Connection status indicator
-        status_row = QHBoxLayout()
-        self._conn_status = StatusIndicator("Disconnected", "offline")
-        status_row.addWidget(self._conn_status)
-        status_row.addStretch()
-        conn_card.add_layout(status_row)
-
-        # Connect / Disconnect buttons
-        btn_row = QHBoxLayout()
-        self._connect_btn = ThemedButton("Connect", ThemedButton.VARIANT_PRIMARY)
-        self._disconnect_btn = ThemedButton("Disconnect", ThemedButton.VARIANT_DANGER)
-        self._disconnect_btn.setEnabled(False)
-        self._connect_btn.clicked.connect(self._on_connect)
-        self._disconnect_btn.clicked.connect(self._on_disconnect)
-        btn_row.addWidget(self._connect_btn)
-        btn_row.addWidget(self._disconnect_btn)
-        btn_row.addStretch()
-        conn_card.add_layout(btn_row)
-
-        note = ThemedLabel(
-            "Note: OAuth login is planned for a future release. "
-            "Use a manual bot token for now.",
-            font_size=FontSize.SMALL,
-            color_role=ColorRole.TEXT_MUTED,
-            word_wrap=True,
-        )
-        conn_card.add_widget(note)
 
         # ── Card: Options ─────────────────────────────────────────────────────
         opts_card = SettingsCard("Options", "WebSocket and startup behaviour.")
@@ -152,37 +101,11 @@ class GravityBotPage(QWidget):
 
     def _load_values(self) -> None:
         gb = self._svc.settings.gravity_bot
-        self._token_edit.setText(gb.auth_token)
         self._ws_toggle.set_checked(gb.ws_enabled, animated=False)
         self._auto_toggle.set_checked(gb.auto_connect, animated=False)
-        self._on_connected_changed(self._bot_svc.is_connected)
 
     def _save(self) -> None:
         gb = self._svc.settings.gravity_bot
-        gb.auth_token = self._token_edit.text().strip()
         gb.ws_enabled = self._ws_toggle.is_checked()
         gb.auto_connect = self._auto_toggle.is_checked()
         self._svc.save()
-
-    # ── Actions ────────────────────────────────────────────────────────────────
-
-    def _on_connect(self) -> None:
-        self._save()
-        self._conn_status.set_status("connecting", "Connecting…")
-        self._connect_btn.setEnabled(False)
-        self._bot_svc.connect_bot()
-
-    def _on_disconnect(self) -> None:
-        self._bot_svc.disconnect_bot()
-
-    # ── Signal handlers ────────────────────────────────────────────────────────
-
-    def _on_connected_changed(self, connected: bool) -> None:
-        if connected:
-            self._conn_status.set_status("online", "Connected")
-            self._connect_btn.setEnabled(False)
-            self._disconnect_btn.setEnabled(True)
-        else:
-            self._conn_status.set_status("offline", "Disconnected")
-            self._connect_btn.setEnabled(True)
-            self._disconnect_btn.setEnabled(False)

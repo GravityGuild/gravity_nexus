@@ -14,7 +14,7 @@ class LogEventKind(Enum):
     """
 
     UNKNOWN = auto()
-    RAID_DUMP = auto()
+    RAID_LOG = auto()
     ZONE_CHANGE = auto()
     GUILD_CHAT = auto()
 
@@ -25,5 +25,6 @@ class LogEvent:
 
     timestamp: datetime
     raw: str
+    message: str
     kind: LogEventKind = LogEventKind.UNKNOWN
 

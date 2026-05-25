@@ -39,7 +39,7 @@ class QssBuilder:
     """Builds the complete application QSS from a ThemeSpec and a font scale."""
 
     @staticmethod
-    def build(spec: ThemeSpec, base_pt: int) -> str:
+    def build(spec: ThemeSpec, base_pt: int, use_orbitron_headings: bool = True) -> str:
         """Return the full application QSS string.
 
         Parameters
@@ -49,6 +49,9 @@ class QssBuilder:
         base_pt:
             User-chosen base font size in points.  All ``font-size`` values
             are scaled relative to the authored 13-px reference scale.
+        use_orbitron_headings:
+            When False, the body font is used for heading elements instead of
+            the Orbitron display font.
         """
         scale = base_pt / QSS_BASE_PX
         sz    = _font_sizes(scale)
@@ -57,7 +60,7 @@ class QssBuilder:
 
         # Convenience shortcuts
         body    = f[FontRole.BODY]
-        display = f[FontRole.DISPLAY]
+        display = f[FontRole.DISPLAY] if use_orbitron_headings else body
         mono    = f[FontRole.MONO]
         tp      = p[ColorRole.TEXT_PRIMARY]
         ts      = p[ColorRole.TEXT_SECONDARY]
@@ -91,15 +94,15 @@ QWidget {{
 #AppContent {{
     background: qlineargradient(x1:0, y1:0, x2:0.4, y2:1,
         stop:0 #0B1730, stop:0.45 #081120, stop:1 #0B1730);
-    border-radius: 12px;
+    border-radius: 0px;
     border: 1px solid rgba(87, 199, 255, 30);
 }}
 /* ═══ TITLE BAR ════════════════════════════════════════════════════════════ */
 #TitleBar {{
-    background: rgba(8, 17, 32, 200);
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
-    border-bottom: 1px solid rgba(87, 199, 255, 35);
+    background: rgba(14, 28, 62, 255);
+    border-top-left-radius: 0px;
+    border-top-right-radius: 0px;
+    border-bottom: 1px solid rgba(87, 199, 255, 80);
     min-height: 44px;
     max-height: 44px;
 }}
@@ -164,8 +167,8 @@ QWidget {{
 #StatusBar {{
     background: rgba(8, 17, 32, 200);
     border-top: 1px solid rgba(87, 199, 255, 30);
-    border-bottom-left-radius: 12px;
-    border-bottom-right-radius: 12px;
+    border-bottom-left-radius: 0px;
+    border-bottom-right-radius: 0px;
     min-height: 28px;
     max-height: 28px;
     padding: 0px 14px;
@@ -190,6 +193,37 @@ QWidget {{
 #SettingsCardTitle    {{ color: {tp}; font-size: {sz[FontSize.MEDIUM]}px; font-weight: bold; }}
 #SettingsCardSubtitle {{ color: {ts}; font-size: {sz[FontSize.SMALL]}px; }}
 #SettingsCardBody     {{ background: transparent; padding: 14px 16px; }}
+/* ═══ TOOL CARD ════════════════════════════════════════════════════════════ */
+#ToolCard {{
+    background: rgba(17, 34, 64, 210);
+    border: 1px solid rgba(87, 199, 255, 45);
+    border-radius: 10px;
+}}
+#ToolCardHeader {{
+    background: rgba(22, 43, 77, 160);
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    border-bottom: 1px solid rgba(87, 199, 255, 30);
+    min-height: 50px;
+}}
+#ToolCardHeader:hover    {{ background: rgba(22, 43, 77, 210); }}
+#ToolCardChevron         {{ color: {ap}; font-size: {sz[FontSize.SMALL]}px; }}
+#ToolCardTitle           {{ color: {tp}; font-size: {sz[FontSize.MEDIUM]}px; font-weight: bold; }}
+#ToolCardDescription     {{ color: {ts}; font-size: {sz[FontSize.SMALL]}px; }}
+#ToolCardBody            {{ background: transparent; }}
+#ToolCardTabs            {{ background: transparent; border: none; }}
+#ToolCardTabs::pane      {{ background: transparent; border: none; border-top: 1px solid rgba(87, 199, 255, 25); }}
+#ToolCardTabs QTabBar::tab {{
+    background: transparent;
+    color: {ts};
+    font-size: {sz[FontSize.SMALL]}px;
+    padding: 7px 18px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    min-width: 80px;
+}}
+#ToolCardTabs QTabBar::tab:hover    {{ color: {tp}; border-bottom: 2px solid rgba(87, 199, 255, 60); }}
+#ToolCardTabs QTabBar::tab:selected {{ color: {ap}; font-weight: bold; border-bottom: 2px solid {ap}; }}
 /* ═══ SECTION HEADER ═══════════════════════════════════════════════════════ */
 #SectionHeader {{ color: {ap}; font-size: {sz[FontSize.SMALL]}px; font-weight: bold; }}
 /* ═══ BUTTONS ══════════════════════════════════════════════════════════════ */
