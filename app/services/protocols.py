@@ -31,7 +31,7 @@ class ILogParserService(Protocol):
 
     # Qt Signals — typed as Any; connect after resolving from registry
     line_parsed: Any         # Signal(LogEvent)
-    raid_dump_detected: Any  # Signal(list[str])
+    raid_log_detected: Any  # Signal(list[str])
     active_file_changed: Any # Signal(str) — character name
     zone_changed: Any        # Signal(str) — zone name
     status_changed: Any      # Signal(str)
@@ -65,8 +65,32 @@ class ILogParserService(Protocol):
 class IAuthService(Protocol):
     """Authentication state and token access."""
 
+    @property
+    def username(self) -> str | None: ...
     def get_access_token(self) -> str | None: ...
     def is_authenticated(self) -> bool: ...
+
+
+class IUpdateService(Protocol):
+    """Manages application update checking and installation."""
+
+    # Qt Signals — typed as Any; connect after resolving from registry
+    update_available: Any   # Signal(str, str) — (version, download_url)
+    update_downloaded: Any  # Signal(str, str) — (version, installer_path)
+    download_progress: Any  # Signal(int) — 0–100
+    update_status: Any      # Signal(str)
+    update_error: Any       # Signal(str)
+    restart_requested: Any  # Signal()
+
+    def start(self) -> None: ...
+
+    def check_for_updates(self) -> None: ...
+
+    def download_update(self, version: str, url: str) -> None: ...
+
+    def install_and_restart(self, installer_path: str) -> None: ...
+
+    def shutdown(self) -> None: ...
 
 
 class IGravityBotService(Protocol):
@@ -86,6 +110,8 @@ class IGravityBotService(Protocol):
     def disconnect_bot(self) -> None: ...
 
     def fetch_raids(self) -> None: ...
+
+    def fetch_raids_cached(self, max_age_secs: float = 30.0) -> None: ...
 
     def submit_raid_log(self, channel_id: int, full_who_log: str) -> None: ...
 

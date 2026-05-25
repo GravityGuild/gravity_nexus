@@ -55,7 +55,7 @@ class FontSize(str, Enum):
 
     TINY    = "tiny"     # 9 px at base scale
     SMALL   = "small"    # 11 px
-    MEDIUM  = "medium"   # 13 px  (body / reference)
+    MEDIUM  = "medium"   # 16 px  (body / reference at default scale)
     LARGE   = "large"    # 15 px
     XL      = "xl"       # 18 px
     HEADING = "heading"  # 22 px  (page titles)

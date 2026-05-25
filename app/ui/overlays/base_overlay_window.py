@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -42,7 +42,15 @@ class BaseOverlayWindow(QWidget):
     - ``set_overlay_scale(0.5 – 3.0)`` scales the window size proportionally
       relative to the natural (100%) size set by the subclass via ``resize()``.
     - Subclasses add content to ``self.content_layout`` (a QVBoxLayout).
+
+    Signals
+    -------
+    position_changed():
+        Emitted whenever the window is moved or resized so callers can
+        auto-save geometry without waiting for the overlay to close.
     """
+
+    position_changed = Signal()
 
     def __init__(
         self,
@@ -119,6 +127,11 @@ class BaseOverlayWindow(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
         self._reposition_grips()
+        self.position_changed.emit()
+
+    def moveEvent(self, event) -> None:  # noqa: ANN001
+        super().moveEvent(event)
+        self.position_changed.emit()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 

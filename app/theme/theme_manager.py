@@ -5,7 +5,7 @@ Usage::
     ThemeManager.instance().apply(app)
     ThemeManager.instance().set_font_scale(app, base_pt=15)
     ThemeManager.instance().get_color(ColorRole.ACCENT_ALT)   # → "#D8B36A"
-    ThemeManager.instance().get_font_size_px(FontSize.SMALL)  # → 12 (at default scale)
+    ThemeManager.instance().get_font_size_px(FontSize.SMALL)  # → 14 (at default scale)
 """
 from __future__ import annotations
 
@@ -41,14 +41,14 @@ _FONT_FILES: list[str] = [
 # These map a human-readable label to a base pt value.  All QSS font sizes scale
 # proportionally relative to QSS_BASE_PX (13 px) at each of these pt values.
 FONT_SIZE_OPTIONS: list[tuple[str, int]] = [
-    ("Small (11 pt)",       11),
-    ("Normal (14 pt)",      14),
-    ("Large (16 pt)",       16),
-    ("Extra Large (19 pt)", 19),
-    ("Huge (23 pt)",        23),
+    ("Small (13 pt)",       13),
+    ("Normal (16 pt)",      16),
+    ("Large (18 pt)",       18),
+    ("Extra Large (22 pt)", 22),
+    ("Huge (26 pt)",        26),
 ]
 
-_DEFAULT_FONT_PT: int = 14
+_DEFAULT_FONT_PT: int = 16
 
 
 class ThemeManager:
@@ -65,9 +65,10 @@ class ThemeManager:
     _instance: Optional["ThemeManager"] = None
 
     def __init__(self) -> None:
-        self._spec:             ThemeSpec = DARK_NAVY
-        self._current_font_pt:  int       = _DEFAULT_FONT_PT
-        self._fonts_loaded:     bool      = False
+        self._spec:                   ThemeSpec = DARK_NAVY
+        self._current_font_pt:        int       = _DEFAULT_FONT_PT
+        self._fonts_loaded:           bool      = False
+        self._use_orbitron_headings:  bool      = True
 
     # ── Singleton ──────────────────────────────────────────────────────────────
 
@@ -80,7 +81,12 @@ class ThemeManager:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def apply(self, app: QApplication, base_font_size_pt: int = _DEFAULT_FONT_PT) -> None:
+    def apply(
+        self,
+        app: QApplication,
+        base_font_size_pt: int = _DEFAULT_FONT_PT,
+        use_orbitron_headings: bool = True,
+    ) -> None:
         """Register fonts and apply the stylesheet to *app*.
 
         Parameters
@@ -90,7 +96,10 @@ class ThemeManager:
         base_font_size_pt:
             Point size for the UI base font.  All QSS ``font-size`` values are
             scaled proportionally relative to the 13 px reference scale.
+        use_orbitron_headings:
+            When False, heading elements use the body font instead of Orbitron.
         """
+        self._use_orbitron_headings = use_orbitron_headings
         self._register_fonts()
         self._apply(app, base_font_size_pt)
         log.debug(
@@ -98,6 +107,11 @@ class ThemeManager:
             self._spec.name,
             base_font_size_pt,
         )
+
+    def apply_orbitron_headings(self, app: QApplication, enabled: bool) -> None:
+        """Toggle the Orbitron heading font and immediately re-apply the stylesheet."""
+        self._use_orbitron_headings = enabled
+        self._apply(app, self._current_font_pt)
 
     def set_font_scale(self, app: QApplication, base_font_size_pt: int) -> None:
         """Change the font scale at runtime and immediately re-apply the stylesheet.
@@ -162,7 +176,7 @@ class ThemeManager:
     def _apply(self, app: QApplication, pt: int) -> None:
         """Build QSS from the current spec + pt, then apply to *app*."""
         self._current_font_pt = pt
-        qss = QssBuilder.build(self._spec, pt)
+        qss = QssBuilder.build(self._spec, pt, use_orbitron_headings=self._use_orbitron_headings)
         app.setStyleSheet(qss)
         app.setFont(QFont(self._spec.font_family(FontRole.BODY), pt))
 

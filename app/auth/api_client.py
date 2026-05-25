@@ -31,6 +31,12 @@ class ApiClient:
         self._client = httpx.Client(
             headers={"Content-Type": "application/json"},
             timeout=httpx.Timeout(30, connect=10),
+            # Windows WPAD proxy autodetection adds ~2 s on the first connection to
+            # each host. This app never needs a proxy, so skip the OS probe entirely.
+            trust_env=False,
+            # Keep idle connections alive for 2 minutes so a warmed connection
+            # survives until the user opens the raid overlay (default is 5 s).
+            limits=httpx.Limits(keepalive_expiry=120.0),
         )
 
     def get(self, path: str, **kwargs) -> httpx.Response:
@@ -39,19 +45,23 @@ class ApiClient:
     def post(self, path: str, json: Optional[dict] = None, **kwargs) -> httpx.Response:
         return self._request("POST", path, json=json, **kwargs)
 
-    def warmup_async(self) -> None:
-        """GET /auth/me in a daemon thread to validate the token and pre-warm the
-        connection pool.  Fire-and-forget — the result is only logged."""
-        def _run() -> None:
-            try:
-                t0 = time.perf_counter()
-                resp = self.get("/auth/me")
-                ms = (time.perf_counter() - t0) * 1000
-                log.info("connection warmup: GET /auth/me status=%d  %.1f ms", resp.status_code, ms)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("connection warmup failed: %s", exc)
+    def warmup(self) -> None:
+        """GET /auth/me to validate the token and pre-warm the connection pool.
 
-        threading.Thread(target=_run, daemon=True, name="api-warmup").start()
+        Call this synchronously while a startup spinner is visible so the pool
+        is live before the user can interact with the UI.
+        """
+        try:
+            t0 = time.perf_counter()
+            resp = self.get("/auth/me")
+            ms = (time.perf_counter() - t0) * 1000
+            log.info("connection warmup: GET /auth/me status=%d  %.1f ms", resp.status_code, ms)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("connection warmup failed: %s", exc)
+
+    def warmup_async(self) -> None:
+        """Fire-and-forget version of warmup() — use when no spinner is visible."""
+        threading.Thread(target=self.warmup, daemon=True, name="api-warmup").start()
 
     def close(self) -> None:
         """Release the underlying connection pool.  Call from closeEvent."""
@@ -68,7 +78,9 @@ class ApiClient:
         self, method: str, path: str, _retry: bool = True, **kwargs
     ) -> httpx.Response:
         url = f"{self._base}{path}"
-        resp = self._client.request(method, url, headers=self._headers(), **kwargs)
+        extra_headers = kwargs.pop("headers", {})
+        merged_headers = {**self._headers(), **extra_headers}
+        resp = self._client.request(method, url, headers=merged_headers, **kwargs)
         if resp.status_code == 401 and _retry:
             if self._auth._refresh_access_token_sync():
                 return self._request(method, path, _retry=False, **kwargs)

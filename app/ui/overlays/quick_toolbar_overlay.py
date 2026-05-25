@@ -155,13 +155,7 @@ class QuickToolbarOverlay(BaseOverlayWindow):
     Position is locked by default.  Move it via the "Position Overlays" button
     in the Overlays settings page.
 
-    Signals
-    -------
-    position_changed():
-        Emitted on ``moveEvent`` so callers can auto-save the position.
     """
-
-    position_changed = Signal()
 
     # ── Init ──────────────────────────────────────────────────────────────────
 
@@ -444,10 +438,6 @@ class QuickToolbarOverlay(BaseOverlayWindow):
             log.debug("QuickToolbarOverlay: could not save toolbar settings")
 
     # ── Events ────────────────────────────────────────────────────────────────
-
-    def moveEvent(self, event) -> None:  # noqa: ANN001
-        super().moveEvent(event)
-        self.position_changed.emit()
 
     def closeEvent(self, event) -> None:  # noqa: ANN001
         self._save_settings()

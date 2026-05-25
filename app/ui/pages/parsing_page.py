@@ -1,14 +1,12 @@
 from typing import Optional
 
-from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QVBoxLayout, QLabel, QWidget, QHBoxLayout, QSizePolicy
+from PySide6.QtWidgets import QVBoxLayout, QLabel, QWidget
 
 from core.registry import registry
 from services.protocols import ILogParserService, ISettingsService
 from theme import FontSize, ColorRole
 from ui.cards import SettingsCard
 from ui.pages.pages import _toggle_row, _make_page_scroll, _page_header
-from ui.sidebar import _StatusDot
 from ui.widgets import ThemedButton, ThemedLabel
 
 
@@ -21,12 +19,8 @@ class ParsingPage(QWidget):
     matcher class and register it in ``LogParserService.__init__``.
     """
 
-    start_parser_requested = Signal()  # MainWindow reads directory from settings
-    stop_parser_requested = Signal()
-
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._parser_running = False
         self.setObjectName("PageWrapper")
         self._svc = registry.get(ISettingsService)
         self._parser_svc = registry.get(ILogParserService)
@@ -34,14 +28,6 @@ class ParsingPage(QWidget):
         scroll, vl = _make_page_scroll()
 
         _page_header(vl, "Parsing", "Enable or disable individual log-event handlers.")
-
-        # ── Card: Parser status   ─────────────────────────────────────────────
-        parser_status_card = SettingsCard(
-            "Parser",
-            "View the current status of the parser and start or stop it.",
-        )
-        self._build_status(parser_status_card)
-        vl.addWidget(parser_status_card)
 
         # ── Card: active handlers ─────────────────────────────────────────────
         handlers_card = SettingsCard(
@@ -57,6 +43,8 @@ class ParsingPage(QWidget):
         matchers = self._parser_svc.builtin_matchers
         if matchers:
             for matcher in matchers:
+                if matcher.MATCHER_KEY == "raid_log":
+                    continue  # managed on the Raid Tools page
                 # Look up persisted state; fall back to ENABLED_BY_DEFAULT
                 saved = self._svc.settings.parsing.enabled_matchers.get(
                     matcher.MATCHER_KEY, matcher.ENABLED_BY_DEFAULT
@@ -103,60 +91,3 @@ class ParsingPage(QWidget):
             enabled_map[matcher.MATCHER_KEY] = state
             matcher.set_enabled(state)
         self._svc.save()
-
-    def _build_status(self, card: SettingsCard) -> None:
-        # Status row
-        hl_status = QHBoxLayout()
-        # Left Status Text
-        status_lbl = QLabel("Status")
-        status_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        hl_status.addWidget(status_lbl)
-
-        # Running/stopped text
-        self._status_text = QLabel("Stopped")
-        self._status_text.setObjectName("StatusBarText")
-        hl_status.addWidget(self._status_text)
-
-        # Status dot
-        self._status_dot = _StatusDot("offline")
-        hl_status.addWidget(self._status_dot)
-
-        card.add_layout(hl_status)
-
-        # Character row
-        hl_char = QHBoxLayout()
-        char_lbl = QLabel("Character")
-        char_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        hl_char.addWidget(char_lbl)
-        self._character_text = QLabel("—")
-        self._character_text.setObjectName("StatusBarText")
-        hl_char.addWidget(self._character_text)
-        card.add_layout(hl_char)
-
-        # Start/stop button
-        self._parser_btn = ThemedButton("▶  Start Parser", ThemedButton.VARIANT_PRIMARY)
-        self._parser_btn.clicked.connect(self._on_parser_btn_clicked)
-        card.add_widget(self._parser_btn)
-
-    def _on_parser_btn_clicked(self) -> None:
-        if self._parser_running:
-            self.stop_parser_requested.emit()
-        else:
-            self.start_parser_requested.emit()
-
-    def set_parser_status(self, running: bool, log_name: str = "") -> None:
-        self._parser_running = running
-        if running:
-            self._status_dot.set_status("online")
-            self._status_text.setText("Running")
-            self._character_text.setText(log_name or "—")
-            self._parser_btn.setText("■  Stop Parser")
-            self._parser_btn.setProperty("variant", "danger")
-        else:
-            self._status_dot.set_status("offline")
-            self._status_text.setText("Stopped")
-            self._character_text.setText("—")
-            self._parser_btn.setText("▶  Start Parser")
-            self._parser_btn.setProperty("variant", "primary")
-        self._parser_btn.style().unpolish(self._parser_btn)
-        self._parser_btn.style().polish(self._parser_btn)

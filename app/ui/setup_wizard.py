@@ -241,6 +241,26 @@ class SetupWizard(QDialog):
         )
         vl.addWidget(sub2)
 
+        vl.addSpacing(16)
+
+        row3 = QHBoxLayout()
+        lbl3 = QLabel("Auto-start log parser on launch")
+        lbl3.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._toggle_auto_start = ToggleSwitch(
+            checked=self._svc.settings.general.auto_start_parser
+        )
+        row3.addWidget(lbl3)
+        row3.addWidget(self._toggle_auto_start)
+        vl.addLayout(row3)
+
+        sub3 = ThemedLabel(
+            "Automatically begins watching your EQ log file when the app starts.",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_MUTED,
+            word_wrap=True,
+        )
+        vl.addWidget(sub3)
+
         vl.addStretch()
         return page
 
@@ -342,6 +362,7 @@ class SetupWizard(QDialog):
         g.log_directory = self._log_dir_edit.text().strip()
         g.start_with_windows = self._toggle_startup.is_checked()
         g.minimize_to_tray = self._toggle_tray.is_checked()
+        g.auto_start_parser = self._toggle_auto_start.is_checked()
         self._svc.settings.setup_wizard_completed = True
         self._svc.save()
 

@@ -14,13 +14,13 @@ Layout::
 """
 from __future__ import annotations
 
+import sys
 from typing import Optional
 
 from PySide6.QtCore import Qt, Slot
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QStackedWidget,
     QSystemTrayIcon,
@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 
 from core.registry import registry
 from services.fake_log_service import FakeLogService
-from services.protocols import IGravityBotService, ILogParserService, ISettingsService
+from services.protocols import IGravityBotService, ILogParserService, ISettingsService, IUpdateService
 from services.mock_data_provider import MockDataProvider
 from ui.overlays.raid_submit_overlay import RaidSubmitOverlay
 from ui.overlays.positioning_overlay import PositioningOverlay
@@ -46,8 +46,11 @@ from ui.pages import (
     GravityBotPage,
     NotificationsPage,
     OverlaysPage,
+    PageConfig,
     ParsingPage,
+    RaidToolsPage,
 )
+from ui.widgets.icon_label import AppIcon
 from ui.sidebar import Sidebar
 from ui.statusbar import StatusBar
 from ui.titlebar import TitleBar
@@ -101,20 +104,14 @@ class MainWindow(QWidget):
 
     def _build_ui(self) -> None:
         # Outer layout provides the transparent shadow margin
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(10, 10, 10, 10)
+        self._outer_layout = QVBoxLayout(self)
+        outer = self._outer_layout
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
         # Inner content frame (the visible window body)
         self._content = QWidget()
         self._content.setObjectName("AppContent")
-
-        # Drop shadow on the content frame
-        shadow = QGraphicsDropShadowEffect(self._content)
-        shadow.setBlurRadius(28)
-        shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, 100))
-        self._content.setGraphicsEffect(shadow)
 
         content_layout = QVBoxLayout(self._content)
         content_layout.setContentsMargins(0, 0, 0, 0)
@@ -145,24 +142,58 @@ class MainWindow(QWidget):
         self._populate_pages()
 
     def _populate_pages(self) -> None:
-        """Create and register all page widgets in the QStackedWidget."""
+        """Create page widgets, register them in the stack, and configure sidebar nav."""
         self._general_page = GeneralPage()
+        self._raid_tools_page = RaidToolsPage()
         self._overlays_page = OverlaysPage(self._mock_provider)
         self._parsing_page = ParsingPage()
-        pages = [
-            self._general_page,       # 0
-            self._overlays_page,      # 1
-            self._parsing_page,       # 2
-            NotificationsPage(),      # 3
-            AppearancePage(),         # 4
-            AdvancedPage(),           # 5
-            GravityBotPage(),         # 6
-            FakeLogPage(self._fake_log_svc),  # 7  (Dev Tools in nav)
-            FeatureFlagsPage(),       # 8
-            AboutPage(),              # 9
+        self._advanced_page = AdvancedPage()
+
+        configs: list[PageConfig] = [
+            PageConfig("General",
+                       AppIcon.HOME,
+                       lambda: self._general_page),
+            PageConfig("Raid Tools",
+                       AppIcon.WRENCH,
+                       lambda: self._raid_tools_page),
+            PageConfig("Overlays",
+                       AppIcon.MONITOR_DASHBOARD,
+                       lambda: self._overlays_page),
+            PageConfig("Parsing",
+                       AppIcon.APPLICATION_BRACKETS,
+                       lambda: self._parsing_page,
+                       dev_only=True),
+            PageConfig("Notifications",
+                       AppIcon.BELL,
+                       NotificationsPage,
+                       feature_flag="notifications_page"),
+            PageConfig("Appearance",
+                       AppIcon.PALETTE,
+                       AppearancePage),
+            PageConfig("Advanced",
+                       AppIcon.HAMMER_WRENCH,
+                       lambda: self._advanced_page),
+            PageConfig("Gravity Bot",
+                       AppIcon.ROBOT,
+                       GravityBotPage,
+                       dev_only=True),
+            PageConfig("Dev Tools",
+                       AppIcon.TEST_TUBE,
+                       lambda: FakeLogPage(self._fake_log_svc),
+                       dev_only=True),
+            PageConfig("Feature Flags",
+                       AppIcon.CODE_BRACES,
+                       FeatureFlagsPage,
+                       dev_only=True),
+            PageConfig("About",
+                       AppIcon.INFORMATION,
+                       AboutPage),
         ]
-        for page in pages:
-            self._stack.addWidget(page)
+
+        for cfg in configs:
+            self._stack.addWidget(cfg.factory())
+
+        self._sidebar.set_page_configs(configs)
 
     # ── Signals ────────────────────────────────────────────────────────────────
 
@@ -172,23 +203,24 @@ class MainWindow(QWidget):
         if self._auth is not None:
             self._auth.session_expired.connect(self._on_session_expired)
             self._auth.logged_in.connect(self._on_logged_in)
-            self._auth.logged_out.connect(self._sidebar.clear_user)
+            self._auth.logged_out.connect(self._on_logged_out)
             self._sidebar.logout_requested.connect(self._auth.logout)
 
         # Log parser
         self._parser_svc.status_changed.connect(self._on_parser_status_changed)
         self._parser_svc.active_file_changed.connect(self._on_active_file_changed)
-        self._parser_svc.raid_dump_detected.connect(self._on_raid_dump_detected)
+        self._parser_svc.raid_log_detected.connect(self._on_raid_log_detected)
 
         # Gravity Bot
         self._bot_svc.connected_changed.connect(self._status_bar.set_grav_bot_connected)
+        self._status_bar.set_grav_bot_connected(self._bot_svc.is_connected)
 
         # General page — directory save on start (no longer owns buttons)
         self._general_page.start_parser_requested.connect(self._on_start_parser_requested)
 
-        # Sidebar parser controls
-        self._parsing_page.start_parser_requested.connect(self._on_sidebar_start_parser)
-        self._parsing_page.stop_parser_requested.connect(self._parser_svc.stop)
+        # Advanced page parser controls
+        self._advanced_page.start_parser_requested.connect(self._on_sidebar_start_parser)
+        self._advanced_page.stop_parser_requested.connect(self._parser_svc.stop)
 
         # Overlay positioning
         self._overlays_page.position_overlays_requested.connect(self._on_position_overlays_requested)
@@ -210,12 +242,23 @@ class MainWindow(QWidget):
     def _on_logged_in(self) -> None:
         if self._auth and self._auth._username:
             self._sidebar.set_user(self._auth._username)
+        self._bot_svc.connect_bot()
+
+    @Slot()
+    def _on_logged_out(self) -> None:
+        self._sidebar.clear_user()
+        self._bot_svc.disconnect_bot()
+        from PySide6.QtWidgets import QDialog as _QDialog  # noqa: PLC0415
+        from ui.login_dialog import LoginDialog             # noqa: PLC0415
+        dialog = LoginDialog(self._auth, self)
+        if dialog.exec() != _QDialog.DialogCode.Accepted:
+            QApplication.quit()
 
     @Slot()
     def _on_session_expired(self) -> None:
         from PySide6.QtWidgets import QDialog as _QDialog  # noqa: PLC0415
         from ui.login_dialog import LoginDialog             # noqa: PLC0415
-        dialog = LoginDialog(self._auth, registry.get(ISettingsService), self)
+        dialog = LoginDialog(self._auth, self)
         if dialog.exec() != _QDialog.DialogCode.Accepted:
             QApplication.quit()
 
@@ -248,7 +291,7 @@ class MainWindow(QWidget):
         """Called when the parser locks onto a (new) log file."""
         self._active_character = character
         self._status_bar.set_parser_running(True, character)
-        self._parsing_page.set_parser_status(True, character)
+        self._advanced_page.set_parser_status(True, character)
         self._general_page.update_parser_status(True, character)
 
     def _on_parser_status_changed(self, status: str) -> None:
@@ -257,13 +300,16 @@ class MainWindow(QWidget):
         self._active_character = ""
         running = False
         self._status_bar.set_parser_running(running)
-        self._parsing_page.set_parser_status(running)
+        self._advanced_page.set_parser_status(running)
         self._general_page.update_parser_status(running)
 
-    def _on_raid_dump_detected(self, arg_vals: list) -> None:
+    def _on_raid_log_detected(self, arg_vals: list) -> None:
         raw_lines = arg_vals[0]
         full_who_log: str = arg_vals[1]
         """Show (or replace) the raid submit overlay."""
+        # Pre-fetch raids now so the overlay dropdown is ready (or nearly so) by
+        # the time the user sees it.
+        self._bot_svc.fetch_raids()
         if self._raid_overlay is not None:
             try:
                 self._raid_overlay.close()
@@ -272,6 +318,7 @@ class MainWindow(QWidget):
 
         self._raid_overlay = RaidSubmitOverlay(raw_names=raw_lines, full_who_log=full_who_log)
         self._raid_overlay.dismissed.connect(self._on_raid_overlay_dismissed)
+        self._raid_overlay.position_changed.connect(self._on_raid_overlay_moved)
 
         # Apply saved opacity and scale
         self._raid_overlay.set_overlay_opacity(self._svc.settings.overlay.opacity)
@@ -283,6 +330,9 @@ class MainWindow(QWidget):
             x, y, w, h = saved
             if w > 0 and h > 0:
                 self._raid_overlay.resize(w, h)
+            avail = QApplication.primaryScreen().availableGeometry()
+            x = max(avail.left(), min(x, avail.right() - max(w, 50)))
+            y = max(avail.top(), min(y, avail.bottom() - max(h, 50)))
             self._raid_overlay.move(x, y)
         else:
             screen = QApplication.primaryScreen().geometry()
@@ -299,6 +349,16 @@ class MainWindow(QWidget):
             s = self._raid_overlay.size()
             self._svc.settings.overlay.positions["raid_submit"] = (p.x(), p.y(), s.width(), s.height())
             self._svc.save()
+
+    def _on_raid_overlay_moved(self) -> None:
+        if self._raid_overlay is not None:
+            try:
+                p = self._raid_overlay.pos()
+                s = self._raid_overlay.size()
+                self._svc.settings.overlay.positions["raid_submit"] = (p.x(), p.y(), s.width(), s.height())
+                self._svc.save()
+            except RuntimeError:
+                pass
 
     @Slot(float)
     def _on_overlay_opacity_changed(self, opacity: float) -> None:
@@ -347,8 +407,11 @@ class MainWindow(QWidget):
         # Snapshot current positions so Cancel can restore them
         self._position_snapshot = dict(self._svc.settings.overlay.positions)
 
+        from feature_flags import feature_enabled  # noqa: PLC0415
         screen = QApplication.primaryScreen().geometry()
         for key, (label, size) in self._OVERLAY_REGISTRY.items():
+            if key == "toolbar" and not feature_enabled("quick_toolbar", self._svc.settings):
+                continue
             w = PositioningOverlay(key, label, size)
             # Apply opacity/scale FIRST so _base_size is captured from the natural
             # default size.  The saved size is then applied as a hard override
@@ -491,6 +554,8 @@ class MainWindow(QWidget):
         self._parser_svc.stop()
         self._bot_svc.shutdown()
         self._fake_log_svc.stop()
+        if registry.is_registered(IUpdateService):
+            registry.get(IUpdateService).shutdown()
         if self._api is not None:
             self._api.close()
         if self._toolbar_overlay is not None:
@@ -502,6 +567,108 @@ class MainWindow(QWidget):
         self._svc.save()
         super().closeEvent(event)
         QApplication.quit()
+
+    # ── Window state / native resize+snap ─────────────────────────────────────
+
+    def showEvent(self, event) -> None:  # noqa: ANN001
+        super().showEvent(event)
+        if sys.platform == "win32" and not hasattr(self, "_win32_frame_applied"):
+            self._win32_frame_applied = True
+            self._apply_win32_snap_frame()
+
+    def _apply_win32_snap_frame(self) -> None:
+        """Add WS_THICKFRAME to the Win32 window style.
+
+        FramelessWindowHint strips this flag, but Windows requires it to trigger
+        Aero Snap (drag-to-edge and Win+Arrow).  We add it back here and rely on
+        WM_NCCALCSIZE (handled in nativeEvent) to collapse the native frame chrome
+        to zero so the window still looks frameless.
+        """
+        import ctypes
+
+        hwnd = int(self.winId())
+        GWL_STYLE = -16
+        WS_THICKFRAME = 0x00040000
+        style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_THICKFRAME)
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, None, 0, 0, 0, 0,
+            0x0001 | 0x0002 | 0x0004 | 0x0020,  # NOSIZE|NOMOVE|NOZORDER|FRAMECHANGED
+        )
+
+    def nativeEvent(self, event_type, message):  # noqa: ANN001
+        """Handle WM_NCCALCSIZE and WM_NCHITTEST for a frameless window that
+        still supports native resize handles and Aero Snap."""
+        if sys.platform == "win32" and event_type == b"windows_generic_MSG":
+            import ctypes
+            import ctypes.wintypes
+
+            msg = ctypes.wintypes.MSG.from_address(int(message))
+
+            if msg.message == 0x0083 and msg.wParam:  # WM_NCCALCSIZE, wParam=TRUE
+                if self.isMaximized():
+                    # Windows pushes a maximized WS_THICKFRAME window 8 px off each
+                    # screen edge. Clamp the proposed rect to the monitor work area
+                    # so the content fills the screen without covering the taskbar.
+                    hwnd = int(self.winId())
+                    monitor = ctypes.windll.user32.MonitorFromWindow(hwnd, 2)
+
+                    class _RECT(ctypes.Structure):
+                        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                                    ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+                    class _MONITORINFO(ctypes.Structure):
+                        _fields_ = [("cbSize", ctypes.c_uint32), ("rcMonitor", _RECT),
+                                    ("rcWork", _RECT), ("dwFlags", ctypes.c_uint32)]
+
+                    mi = _MONITORINFO()
+                    mi.cbSize = ctypes.sizeof(_MONITORINFO)
+                    ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(mi))
+                    rc = ctypes.cast(msg.lParam, ctypes.POINTER(_RECT))
+                    rc[0].left = mi.rcWork.left
+                    rc[0].top = mi.rcWork.top
+                    rc[0].right = mi.rcWork.right
+                    rc[0].bottom = mi.rcWork.bottom
+
+                return True, 0  # collapse native frame chrome → frameless appearance
+
+            if msg.message == 0x0084:  # WM_NCHITTEST
+                from PySide6.QtCore import QPoint
+
+                lx = ctypes.c_int16(msg.lParam & 0xFFFF).value
+                ly = ctypes.c_int16((msg.lParam >> 16) & 0xFFFF).value
+                pos = self.mapFromGlobal(QPoint(lx, ly))
+                x, y = pos.x(), pos.y()
+                w, h = self.width(), self.height()
+
+                BORDER = 8
+                TITLE_H = 44
+                BTN_WIDTH = 130  # approx width of the three window control buttons
+
+                if not self.isMaximized():
+                    if x < BORDER and y < BORDER:
+                        return True, 13  # HTTOPLEFT
+                    if x > w - BORDER and y < BORDER:
+                        return True, 14  # HTTOPRIGHT
+                    if x < BORDER and y > h - BORDER:
+                        return True, 16  # HTBOTTOMLEFT
+                    if x > w - BORDER and y > h - BORDER:
+                        return True, 17  # HTBOTTOMRIGHT
+                    if y < BORDER:
+                        return True, 12  # HTTOP
+                    if y > h - BORDER:
+                        return True, 15  # HTBOTTOM
+                    if x < BORDER:
+                        return True, 10  # HTLEFT
+                    if x > w - BORDER:
+                        return True, 11  # HTRIGHT
+
+                if y <= TITLE_H and x < w - BTN_WIDTH:
+                    return True, 2  # HTCAPTION — enables drag and Aero Snap
+
+                return True, 1  # HTCLIENT
+
+        return super().nativeEvent(event_type, message)
 
     # ── Paint (outer transparent area has no visible content) ─────────────────
 

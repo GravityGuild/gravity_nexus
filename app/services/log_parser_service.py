@@ -47,7 +47,7 @@ Usage
 -----
     svc = registry.get(ILogParserService)
     svc.line_parsed.connect(my_handler)
-    svc.raid_dump_detected.connect(my_raid_handler)
+    svc.raid_log_detected.connect(my_raid_handler)
     svc.active_file_changed.connect(on_char_change)
     svc.status_changed.connect(on_status)
     svc.start("C:/EverQuest/Logs")
@@ -67,7 +67,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from models.log_event import LogEvent, LogEventKind
 from services.matchers.base import LogMatcher
 from services.matchers.guild_chat_matcher import GuildChatMatcher
-from services.matchers.raid_dump_matcher import RaidDumpMatcher
+from services.matchers.raid_log_matcher import RaidLogMatcher
 from services.matchers.who_list_matcher import WhoListMatcher
 from services.matchers.zone_matcher import ZoneMatcher
 
@@ -181,8 +181,8 @@ class LogParserService(QObject):
     -------
     line_parsed(LogEvent):
         Fired for every new log line, before matchers are called.
-    raid_dump_detected(list[str]):
-        Relayed from the built-in ``RaidDumpMatcher`` for convenience.
+    raid_log_detected(list[str]):
+        Relayed from the built-in ``RaidLogMatcher`` for convenience.
     active_file_changed(str):
         Fired when the service starts tailing a new file.  Carries the
         character name extracted from the filename.
@@ -191,7 +191,7 @@ class LogParserService(QObject):
     """
 
     line_parsed = Signal(object)        # LogEvent
-    raid_dump_detected = Signal(list)   # list[str]
+    raid_log_detected = Signal(list)   # list[str]
     who_list_detected = Signal(list)    # list[WhoEntry]
     active_file_changed = Signal(str)   # character name
     zone_changed = Signal(str)          # zone name
@@ -210,10 +210,10 @@ class LogParserService(QObject):
         self._log_directory: Optional[Path] = None
         self._current_path: Optional[Path] = None
 
-        # Built-in raid-dump matcher
-        self._raid_dump_matcher = RaidDumpMatcher(self)
-        self._raid_dump_matcher.raid_dump_detected.connect(self.raid_dump_detected)
-        self.register_matcher(self._raid_dump_matcher)
+        # Built-in raid-log matcher
+        self._raid_log_matcher = RaidLogMatcher(self)
+        self._raid_log_matcher.raid_log_detected.connect(self.raid_log_detected)
+        self.register_matcher(self._raid_log_matcher)
 
         # Built-in zone matcher
         self._zone_matcher = ZoneMatcher(self)
@@ -421,7 +421,9 @@ class LogParserService(QObject):
                 ts = datetime.strptime(m.group(1), _EQ_TS_FMT)
             except ValueError:
                 ts = datetime.now()
+            message = m.group(2)
         else:
             ts = datetime.now()
+            message = raw
 
-        return LogEvent(timestamp=ts, raw=raw, kind=LogEventKind.UNKNOWN)
+        return LogEvent(timestamp=ts, raw=raw, message=message, kind=LogEventKind.UNKNOWN)

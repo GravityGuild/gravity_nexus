@@ -24,7 +24,7 @@ _TIMEOUT_SECS = 60
 
 
 class RaidSubmitOverlay(BaseOverlayWindow):
-    """Frameless overlay shown when a raid attendance dump is detected.
+    """Frameless overlay shown when a raid attendance log is detected.
 
     Displays a preview of the captured log lines and a Submit / Dismiss choice.
     Auto-dismisses after ``_TIMEOUT_SECS`` seconds if the user takes no action.
@@ -145,10 +145,10 @@ class RaidSubmitOverlay(BaseOverlayWindow):
         from services.protocols import IGravityBotService
 
         self._fetch_raids_t0 = _time.perf_counter()
-        log.debug("fetch_raids requested at t=0")
+        log.debug("RAID_TIME fetch_raids requested at t=0")
         svc = registry.get(IGravityBotService)
         svc.raids_fetched.connect(self._on_raids_fetched)
-        svc.fetch_raids()
+        svc.fetch_raids_cached()
 
     def _on_raids_fetched(self, success: bool, body: str) -> None:
         import json as _json
@@ -156,7 +156,7 @@ class RaidSubmitOverlay(BaseOverlayWindow):
 
         t_start = _time.perf_counter()
         t0 = getattr(self, "_fetch_raids_t0", t_start)
-        log.info("_on_raids_fetched: entered  wall=%.1f ms  body=%d bytes", (t_start - t0) * 1000, len(body))
+        log.info("RAID_TIME _on_raids_fetched: entered  wall=%.1f ms  body=%d bytes", (t_start - t0) * 1000, len(body))
 
         self._raid_combo.clear()
         if not success:
@@ -170,7 +170,7 @@ class RaidSubmitOverlay(BaseOverlayWindow):
             self._raid_combo.addItem("Failed to load raids")
             return
         t_parse1 = _time.perf_counter()
-        log.debug("  json.loads: %.2f ms  (%d raids)", (t_parse1 - t_parse0) * 1000, len(raids))
+        log.debug("RAID_TIME   json.loads: %.2f ms  (%d raids)", (t_parse1 - t_parse0) * 1000, len(raids))
 
         # Suppress per-item repaints — a translucent overlay repaints the entire
         # window on every model change, so batching matters with many raids.
@@ -183,7 +183,7 @@ class RaidSubmitOverlay(BaseOverlayWindow):
         finally:
             self.setUpdatesEnabled(True)
         t_combo1 = _time.perf_counter()
-        log.debug("  addItem loop: %.2f ms", (t_combo1 - t_combo0) * 1000)
+        log.debug("RAID_TIME   addItem loop: %.2f ms", (t_combo1 - t_combo0) * 1000)
 
         t_enable0 = _time.perf_counter()
         if raids:
@@ -191,10 +191,10 @@ class RaidSubmitOverlay(BaseOverlayWindow):
         else:
             self._raid_combo.addItem("No unsubmitted raids")
         t_enable1 = _time.perf_counter()
-        log.debug("  setEnabled: %.2f ms", (t_enable1 - t_enable0) * 1000)
+        log.debug("RAID_TIME   setEnabled: %.2f ms", (t_enable1 - t_enable0) * 1000)
 
         log.info(
-            "raids dropdown populated: %d items  total=%.1f ms"
+            "RAID_TIME raids dropdown populated: %d items  total=%.1f ms"
             "  (parse=%.1f  addItems=%.1f  setEnabled=%.1f)",
             len(raids),
             (t_enable1 - t_start) * 1000,

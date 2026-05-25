@@ -1,14 +1,17 @@
 """General settings page."""
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMessageBox,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -17,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from core.registry import registry
 from services.log_parser_service import LogFileDiscovery
-from services.protocols import ISettingsService
+from services.protocols import ISettingsService, IUpdateService
 from theme.spec import ColorRole, FontSize
 from ui.cards.settings_card import SettingsCard
 from ui.widgets.themed_button import ThemedButton
@@ -32,12 +35,20 @@ class GeneralPage(QWidget):
     start_parser_requested = Signal(str)  # emits log_directory path
     stop_parser_requested = Signal()
 
+    # Update state: "idle" | "checking" | "available" | "downloading" | "ready" | "error"
+    _update_state: str = "idle"
+    _pending_version: str = ""
+    _pending_url: str = ""
+    _pending_path: str = ""
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("PageWrapper")
         self._svc = registry.get(ISettingsService)
+        self._update_svc = registry.get(IUpdateService)
         self._build_ui()
         self._load_values()
+        self._connect_update_signals()
 
     def _build_ui(self) -> None:
         scroll = QScrollArea(self)
@@ -101,6 +112,62 @@ class GeneralPage(QWidget):
         ]:
             self._add_toggle_row(startup_card, label, attr)
 
+        # ── Card: Integrations ───────────────────────────────────────────────
+        integrations_card = SettingsCard(
+            "Integrations",
+            "Control how Gravity Nexus connects with external services.",
+        )
+        vl.addWidget(integrations_card)
+
+        self._add_toggle_row(
+            integrations_card,
+            "Send guild chat to Gravity Bot",
+            "send_guild_chat",
+        )
+
+        # ── Card: Software Updates ────────────────────────────────────────────
+        update_card = SettingsCard(
+            "Software Updates",
+            "Download and install new releases from GitHub.",
+        )
+        vl.addWidget(update_card)
+
+        status_row = QHBoxLayout()
+        self._update_status_lbl = ThemedLabel(
+            "",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_MUTED,
+            word_wrap=True,
+        )
+        self._update_status_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._update_action_btn = ThemedButton("Check Now", ThemedButton.VARIANT_SECONDARY)
+        self._update_action_btn.clicked.connect(self._on_update_action_clicked)
+        status_row.addWidget(self._update_status_lbl)
+        status_row.addWidget(self._update_action_btn)
+        update_card.add_layout(status_row)
+
+        token_label = QLabel("GitHub Personal Access Token")
+        update_card.add_widget(token_label)
+
+        token_row = QHBoxLayout()
+        self._github_token_edit = ThemedLineEdit("Paste token here…")
+        self._github_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._github_token_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        clear_token_btn = ThemedButton("Clear", ThemedButton.VARIANT_SECONDARY)
+        clear_token_btn.clicked.connect(self._clear_github_token)
+        token_row.addWidget(self._github_token_edit)
+        token_row.addWidget(clear_token_btn)
+        update_card.add_layout(token_row)
+
+        token_hint = ThemedLabel(
+            "Required to enable update checking. "
+            "Saved securely in your system credential store.",
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_MUTED,
+            word_wrap=True,
+        )
+        update_card.add_widget(token_hint)
+
         save_btn = ThemedButton("Save Changes", ThemedButton.VARIANT_PRIMARY)
         save_btn.clicked.connect(self._save)
         vl.addWidget(save_btn, alignment=Qt.AlignmentFlag.AlignLeft)
@@ -130,7 +197,13 @@ class GeneralPage(QWidget):
         self._toggle_start_windows.set_checked(g.start_with_windows, animated=False)
         self._toggle_minimize_tray.set_checked(g.minimize_to_tray, animated=False)
         self._toggle_check_updates.set_checked(g.check_for_updates, animated=False)
+        self._toggle_send_guild_chat.set_checked(
+            self._svc.settings.gravity_bot.send_guild_chat, animated=False
+        )
         self._refresh_discovery_label(g.log_directory)
+        if g.github_token:
+            self._github_token_edit.setText(g.github_token)
+        self._refresh_update_controls()
 
     def _save(self) -> None:
         g = self._svc.settings.general
@@ -138,8 +211,33 @@ class GeneralPage(QWidget):
         g.auto_start_parser = self._toggle_auto_start.is_checked()
         g.start_with_windows = self._toggle_start_windows.is_checked()
         g.minimize_to_tray = self._toggle_minimize_tray.is_checked()
-        g.check_for_updates = self._toggle_check_updates.is_checked()
+        g.github_token = self._github_token_edit.text().strip()
+        g.check_for_updates = self._toggle_check_updates.is_checked() and bool(g.github_token)
+        self._svc.settings.gravity_bot.send_guild_chat = self._toggle_send_guild_chat.is_checked()
         self._svc.save()
+        self._refresh_update_controls()
+
+    def _clear_github_token(self) -> None:
+        self._github_token_edit.clear()
+        self._svc.settings.general.github_token = ""
+        self._svc.settings.general.check_for_updates = False
+        self._svc.save()
+        self._refresh_update_controls()
+
+    def _refresh_update_controls(self) -> None:
+        has_token = bool(self._svc.settings.general.github_token)
+        self._toggle_check_updates.setEnabled(has_token)
+        if not has_token:
+            self._toggle_check_updates.set_checked(False, animated=False)
+            self._update_action_btn.setEnabled(False)
+            self._update_action_btn.setText("Check Now")
+            self._update_state = "idle"
+            self._update_status_lbl.setText("Enter a GitHub token to enable update checking.")
+        elif self._update_state == "idle":
+            self._update_action_btn.setEnabled(True)
+            self._update_status_lbl.setText(
+                self._format_last_checked(self._svc.settings.general.last_update_check_timestamp)
+            )
 
     def _browse_log_directory(self) -> None:
         start = self._log_dir_edit.text() or "C:\\"
@@ -175,3 +273,86 @@ class GeneralPage(QWidget):
 
     def update_parser_status(self, running: bool, log_name: str = "") -> None:
         """No-op — parser status is now shown in the sidebar."""
+
+    # ── Update section ─────────────────────────────────────────────────────────
+
+    def _connect_update_signals(self) -> None:
+        self._update_svc.update_available.connect(self._on_update_available)
+        self._update_svc.update_downloaded.connect(self._on_update_downloaded)
+        self._update_svc.download_progress.connect(self._on_download_progress)
+        self._update_svc.update_status.connect(self._on_update_status)
+        self._update_svc.update_error.connect(self._on_update_error)
+
+    def _on_update_action_clicked(self) -> None:
+        if self._update_state in ("idle", "error"):
+            self._update_state = "checking"
+            self._update_status_lbl.setText("Checking for updates…")
+            self._update_action_btn.setText("Checking…")
+            self._update_action_btn.setEnabled(False)
+            self._update_svc.check_for_updates()
+        elif self._update_state == "available":
+            self._update_svc.download_update(self._pending_version, self._pending_url)
+        elif self._update_state == "ready":
+            reply = QMessageBox.question(
+                self,
+                "Install Update",
+                f"Install v{self._pending_version} now?\n\nThe app will close and restart automatically.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._update_svc.install_and_restart(self._pending_path)
+
+    @Slot(str, str)
+    def _on_update_available(self, version: str, url: str) -> None:
+        self._pending_version = version
+        self._pending_url = url
+        self._update_state = "available"
+        self._update_status_lbl.setText(f"Update available: v{version}")
+        self._update_status_lbl.setProperty("colorRole", "success")
+        self._update_action_btn.setText("Download & Install")
+        self._update_action_btn.setEnabled(True)
+
+    @Slot(str, str)
+    def _on_update_downloaded(self, version: str, path: str) -> None:
+        self._pending_path = path
+        self._update_state = "ready"
+        self._update_status_lbl.setText(f"v{version} ready to install — app will restart")
+        self._update_action_btn.setText("Install Now")
+        self._update_action_btn.setEnabled(True)
+
+    @Slot(int)
+    def _on_download_progress(self, pct: int) -> None:
+        self._update_state = "downloading"
+        self._update_status_lbl.setText(f"Downloading v{self._pending_version}… {pct}%")
+        self._update_action_btn.setText("Downloading…")
+        self._update_action_btn.setEnabled(False)
+
+    @Slot(str)
+    def _on_update_status(self, msg: str) -> None:
+        if self._update_state in ("available", "downloading", "ready", "error"):
+            return
+        self._update_status_lbl.setText(msg)
+        self._update_action_btn.setText("Check Now")
+        self._update_action_btn.setEnabled(True)
+        self._update_state = "idle"
+
+    @Slot(str)
+    def _on_update_error(self, msg: str) -> None:
+        self._update_state = "error"
+        self._update_status_lbl.setText(f"Error: {msg}")
+        self._update_action_btn.setText("Try Again")
+        self._update_action_btn.setEnabled(True)
+
+    @staticmethod
+    def _format_last_checked(timestamp: float) -> str:
+        if timestamp == 0.0:
+            return "Never checked"
+        elapsed = time.time() - timestamp
+        if elapsed < 60:
+            return "Last checked: just now"
+        if elapsed < 3600:
+            mins = int(elapsed / 60)
+            return f"Last checked: {mins} minute{'s' if mins != 1 else ''} ago"
+        hours = int(elapsed / 3600)
+        return f"Last checked: {hours} hour{'s' if hours != 1 else ''} ago"

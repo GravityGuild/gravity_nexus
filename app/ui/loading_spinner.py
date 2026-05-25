@@ -1,6 +1,7 @@
 """LoadingSpinner — frameless startup splash shown while authenticating."""
 from __future__ import annotations
 
+import random
 from typing import Optional
 
 from PySide6.QtCore import Qt, QRectF, QTimer
@@ -58,7 +59,7 @@ class _SpinnerArc(QWidget):
         arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(arc_pen)
         start = int((90 - self._angle) * 16)
-        span  = int(-110 * 16)
+        span = int(-110 * 16)
         painter.drawArc(rect, start, span)
 
 
@@ -95,6 +96,23 @@ class _CardWidget(QWidget):
 
 # ── Public splash window ───────────────────────────────────────────────────────
 
+_FUNNY_SAYINGS = [
+    "Looking for more clerics…",
+    "Cothing to trips…",
+    "BPing yael…",
+    "Tunnelquesting…",
+    "Spending Diikembe's DKP…",
+    "Sending buff requests…",
+    "Looking for my corpse…",
+    "LOADING, PLEASE WAIT…",
+    "You feel yourself starting to appear…",
+    "Train to zone!",
+    "Sending Valick back to VP…",
+    "Thanking Heelur for making me…",
+    "Who let Kueryenya ramp tank?"
+]
+
+
 class LoadingSpinner(QWidget):
     """Frameless, always-on-top splash shown immediately on startup.
 
@@ -103,6 +121,7 @@ class LoadingSpinner(QWidget):
     """
 
     _SHADOW_MARGIN = 20
+    _SAYING_INTERVAL_MS = 2500
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -117,6 +136,7 @@ class LoadingSpinner(QWidget):
         self.setFixedSize(360, 280)
         self._build_ui()
         self._center_on_screen()
+        self._start_saying_cycle()
 
     # ── Construction ──────────────────────────────────────────────────────────
 
@@ -182,10 +202,25 @@ class LoadingSpinner(QWidget):
 
         outer.addWidget(card)
 
+    # ── Saying cycle ──────────────────────────────────────────────────────────
+
+    def _start_saying_cycle(self) -> None:
+        self._saying_pool = random.sample(_FUNNY_SAYINGS, len(_FUNNY_SAYINGS))
+        self._saying_index = 0
+        self._saying_timer = QTimer(self)
+        self._saying_timer.timeout.connect(self._next_saying)
+        self._saying_timer.start(self._SAYING_INTERVAL_MS)
+        self._next_saying()
+
+    def _next_saying(self) -> None:
+        self._status_label.setText(self._saying_pool[self._saying_index])
+        self._saying_index = (self._saying_index + 1) % len(self._saying_pool)
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def set_status(self, text: str) -> None:
         """Update the status text shown beneath the spinner."""
+        self._saying_timer.stop()
         self._status_label.setText(text)
 
     # ── Positioning ───────────────────────────────────────────────────────────

@@ -21,26 +21,8 @@ from theme.colors import (
     TEXT_PRIMARY_RGB,
     TEXT_SECONDARY_RGB,
 )
+from ui.pages.page_config import PageConfig
 from ui.widgets.icon_label import AppIcon, icon_pixmap
-
-
-# Navigation item definitions: (label, icon, page_index, feature_flag_key | None)
-# Items with a feature_flag_key are hidden unless that flag is enabled in settings.
-# Items with label in _DEV_ONLY_LABELS are additionally hidden unless DEV_MODE=1.
-_DEV_ONLY_LABELS: frozenset[str] = frozenset({"Dev Tools", "Feature Flags"})
-
-NAV_ITEMS: list[tuple[str, AppIcon, int, str | None]] = [
-    ("General",        AppIcon.HOME,                    0, None),
-    ("Overlays",       AppIcon.MONITOR_DASHBOARD,       1, None),
-    ("Parsing",        AppIcon.APPLICATION_BRACKETS,    2, None),
-    ("Notifications",  AppIcon.BELL,                    3, "notifications_page"),
-    ("Appearance",     AppIcon.PALETTE,                 4, None),
-    ("Advanced",       AppIcon.HAMMER_WRENCH,           5, None),
-    ("Gravity Bot",    AppIcon.ROBOT,                   6, None),
-    ("Dev Tools",      AppIcon.TEST_TUBE,               7, None),
-    ("Feature Flags",  AppIcon.CODE_BRACES,             8, None),
-    ("About",          AppIcon.INFORMATION,             9, None),
-]
 
 
 class NavButton(QAbstractButton):
@@ -210,13 +192,13 @@ class Sidebar(QWidget):
         self.setFixedWidth(240)
 
         self._nav_buttons: list[NavButton] = []
+        self._nav_page_indices: list[int] = []
         self._active_index = 0
         self._current_username: Optional[str] = None
         self._popup: Optional[_ProfilePopup] = None
         self._popup_visible_at_press = False
 
         self._build_ui()
-        self._select(0)
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -263,23 +245,41 @@ class Sidebar(QWidget):
         nav_label.setObjectName("SidebarSectionLabel")
         vl.addWidget(nav_label)
 
+        self._nav_vl = vl
+        return container
+
+    def set_page_configs(self, configs: list[PageConfig]) -> None:
+        """Populate (or repopulate) the nav section from a list of PageConfig records."""
         from core.registry import registry                          # noqa: PLC0415
         from feature_flags import feature_enabled                   # noqa: PLC0415
         from services.protocols import ISettingsService             # noqa: PLC0415
 
         dev_mode = os.environ.get("DEV_MODE", "").lower() in ("1", "true", "yes")
         settings = registry.get(ISettingsService).settings
-        for label, icon, page_idx, flag_key in NAV_ITEMS:
-            if label in _DEV_ONLY_LABELS and not dev_mode:
-                continue
-            if flag_key and not feature_enabled(flag_key, settings):
-                continue
-            btn = NavButton(label, icon)
-            btn.clicked.connect(lambda checked=False, idx=page_idx: self._on_nav_clicked(idx))
-            self._nav_buttons.append(btn)
-            vl.addWidget(btn)
 
-        return container
+        self._nav_buttons.clear()
+        self._nav_page_indices.clear()
+        while self._nav_vl.count() > 1:
+            item = self._nav_vl.takeAt(1)
+            if item is not None and item.widget() is not None:
+                item.widget().deleteLater()
+
+        first_visible: int | None = None
+        for stack_index, cfg in enumerate(configs):
+            if cfg.dev_only and not dev_mode:
+                continue
+            if cfg.feature_flag and not feature_enabled(cfg.feature_flag, settings):
+                continue
+            btn = NavButton(cfg.label, cfg.icon)
+            btn.clicked.connect(lambda checked=False, idx=stack_index: self._on_nav_clicked(idx))
+            self._nav_buttons.append(btn)
+            self._nav_page_indices.append(stack_index)
+            self._nav_vl.addWidget(btn)
+            if first_visible is None:
+                first_visible = stack_index
+
+        if first_visible is not None:
+            self._select(first_visible)
 
     def _build_profile_section(self) -> QWidget:
         self._profile_section = _ProfileSection()
@@ -331,8 +331,8 @@ class Sidebar(QWidget):
         self.page_requested.emit(index)
 
     def _select(self, index: int) -> None:
-        for i, btn in enumerate(self._nav_buttons):
-            btn.set_selected(i == index)
+        for btn, page_idx in zip(self._nav_buttons, self._nav_page_indices):
+            btn.set_selected(page_idx == index)
         self._active_index = index
 
     # ── Public API ─────────────────────────────────────────────────────────────

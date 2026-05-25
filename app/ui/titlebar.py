@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+import sys
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QMouseEvent, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -27,10 +27,9 @@ class TitleBar(QWidget):
     def __init__(self, window: QWidget) -> None:
         super().__init__(window)
         self._window = window
-        self._drag_pos: Optional[QPoint] = None
-        self._maximized = False
 
         self.setObjectName("TitleBar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(44)
         self._build_ui()
 
@@ -92,38 +91,11 @@ class TitleBar(QWidget):
         self._window.showMinimized()
 
     def _on_maximize(self) -> None:
-        if self._maximized:
+        if self._window.isMaximized():
             self._window.showNormal()
-            self._maximized = False
         else:
             self._window.showMaximized()
-            self._maximized = True
 
     def _on_close(self) -> None:
         self._window.close()
-
-    # ── Drag ───────────────────────────────────────────────────────────────────
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self._window.frameGeometry().topLeft()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if event.buttons() & Qt.MouseButton.LeftButton and self._drag_pos is not None:
-            if self._maximized:
-                self._window.showNormal()
-                self._maximized = False
-                self._drag_pos = QPoint(self._window.width() // 2, 22)
-            self._window.move(event.globalPosition().toPoint() - self._drag_pos)
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        self._drag_pos = None
-        super().mouseReleaseEvent(event)
-
-    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._on_maximize()
-        super().mouseDoubleClickEvent(event)
 

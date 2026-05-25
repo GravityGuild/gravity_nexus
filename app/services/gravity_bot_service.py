@@ -12,10 +12,9 @@ is required in callsites.
 
 Auth
 ----
-A plain bearer token is stored in ``GravityBotSettings.auth_token`` and sent as
-``Authorization: Bearer <token>`` on both channels.
-OAuth is planned for a future release; only the header construction in the two
-thread classes will need updating.
+An OAuth access token is obtained from ``AuthManager`` and sent as
+``Authorization: Bearer <token>`` on the WebSocket channel.
+The token is refreshed automatically on each reconnect attempt.
 
 Usage
 -----
@@ -35,11 +34,11 @@ import logging
 import os
 import threading
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 from auth.api_client import ApiClient
 from auth.auth_manager import AuthManager
@@ -73,19 +72,19 @@ class _WsThread(QThread):
     """Maintains a persistent WebSocket connection to Gravity Bot.
 
     Reconnects automatically with exponential backoff (1 s → 60 s max).
-    Reads GRAVITY_BOT_URL from the environment and auth_token from SettingsService
-    on each (re)connect attempt so changes take effect without restarting.
+    Reads GRAVITY_BOT_URL from the environment and fetches a fresh OAuth token
+    on each (re)connect attempt so an expired token is never reused.
     """
 
     connected_changed = Signal(bool)
     notification_received = Signal(object)  # BotNotification
 
-    def __init__(self, auth_token: str, parent: Optional[QObject] = None) -> None:
+    def __init__(self, get_token: Callable[[], Optional[str]], parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._running = False
         self._ws = None
         self._lock = threading.Lock()
-        self._auth_token = auth_token
+        self._get_token = get_token
 
     def stop(self) -> None:
         """Signal the run loop to exit and immediately close any open socket."""
@@ -130,7 +129,8 @@ class _WsThread(QThread):
         while self._running:
             bot_url = os.environ.get("GRAVITY_BOT_URL", "https://bot.gravityp99.com")
 
-            if not self._auth_token:
+            token = self._get_token()
+            if not token:
                 self.msleep(2_000)
                 continue
 
@@ -140,7 +140,7 @@ class _WsThread(QThread):
                 ws = ws_connect(
                     ws_url,
                     additional_headers={
-                        "Authorization": f"Bearer {self._auth_token}"
+                        "Authorization": f"Bearer {token}"
                     },
                     open_timeout=10,
                 )
@@ -205,6 +205,7 @@ class _RestSubmitThread(QThread):
         request_type: HttpRequestType,
         request_url: str,
         request_body: dict | None = None,
+        headers: dict | None = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -212,13 +213,14 @@ class _RestSubmitThread(QThread):
         self._request_type = request_type
         self._request_url = request_url
         self._request_body = request_body
+        self._headers = headers or {}
 
     def run(self) -> None:
         import time  # noqa: PLC0415
         try:
             t0 = time.perf_counter()
             if self._request_type == HttpRequestType.POST:
-                resp = self._api.post(self._request_url, json=self._request_body)
+                resp = self._api.post(self._request_url, json=self._request_body, headers=self._headers)
             elif self._request_type == HttpRequestType.GET:
                 resp = self._api.get(self._request_url)
             else:
@@ -279,7 +281,11 @@ class GravityBotService(QObject):
         self._submit_threads: list[_RestSubmitThread] = []
         self._connected = False
         self._seq: int = 0  # monotonically increasing per session; reset on reconnect
+        self._raids_cache: Optional[tuple[bool, str]] = None
+        self._raids_cache_ts: float = 0.0
+        self._raids_fetch_in_flight: bool = False
         self.connected_changed.connect(self._on_connected_changed)
+        self.raids_fetched.connect(self._cache_raids_result)
 
     # ── Properties ─────────────────────────────────────────────────────────────
 
@@ -300,16 +306,15 @@ class GravityBotService(QObject):
             log.info("WebSocket disabled in settings — skipping connect")
             return
 
-        access_token = self._auth_manager.get_access_token()
-        if not access_token:
-            log.warning("Gravity Bot token not configured")
+        if not self._auth_manager.is_authenticated():
+            log.warning("Gravity Bot: not authenticated, skipping connect")
             return
 
         if self._ws_thread and self._ws_thread.isRunning():
             log.debug("WebSocket thread already running")
             return
 
-        self._ws_thread = _WsThread(access_token, self)
+        self._ws_thread = _WsThread(self._auth_manager.get_access_token, self)
         self._ws_thread.connected_changed.connect(self.connected_changed)
         self._ws_thread.notification_received.connect(self.notification_received)
         self._ws_thread.start()
@@ -327,6 +332,8 @@ class GravityBotService(QObject):
         """Non-blocking GET of /api/raids from the bot."""
         import time  # noqa: PLC0415
         t0 = time.perf_counter()
+        self._raids_cache = None  # invalidate stale cache before a fresh request
+        self._raids_fetch_in_flight = True
         thread = _RestSubmitThread(
             api=self._api,
             request_type=HttpRequestType.GET,
@@ -339,6 +346,26 @@ class GravityBotService(QObject):
         thread.start()
         log.debug("fetch_raids: thread started in %.2f ms", (time.perf_counter() - t0) * 1000)
 
+    def fetch_raids_cached(self, max_age_secs: float = 30.0) -> None:
+        """Emit raids_fetched from cache if fresh; otherwise call fetch_raids().
+
+        Use this from the overlay so a pre-triggered fetch_raids() call from
+        main_window populates the dropdown without a second network round-trip.
+        """
+        import time  # noqa: PLC0415
+
+        if self._raids_cache is not None and (time.monotonic() - self._raids_cache_ts) < max_age_secs:
+            cached = self._raids_cache
+            log.debug("fetch_raids_cached: serving from cache (age=%.1f s)", time.monotonic() - self._raids_cache_ts)
+            QTimer.singleShot(0, lambda: self.raids_fetched.emit(cached[0], cached[1]))
+            return
+        # Cache is empty (in-flight) or stale — if a fetch is already running,
+        # the raids_fetched signal will fire naturally; if not, start one.
+        if self._raids_fetch_in_flight:
+            log.debug("fetch_raids_cached: fetch already in flight, waiting for signal")
+        else:
+            self.fetch_raids()
+
     def submit_raid_log(self, channel_id: int, full_who_log: str) -> None:
         """Non-blocking POST of the who-log to the bot's raid attendance endpoint."""
         thread = _RestSubmitThread(
@@ -346,6 +373,7 @@ class GravityBotService(QObject):
             request_type=HttpRequestType.POST,
             request_url=f"/api/raids/{channel_id}/attendance",
             request_body={"raidlog": full_who_log},
+            headers={"X-Source": "gravitynexus"},
             parent=self,
         )
         thread.submit_done.connect(self.submit_result)
@@ -364,6 +392,11 @@ class GravityBotService(QObject):
         useful for reconnect detection, replay detection, dropped-message
         diagnostics, and ordering within the client stream.
         """
+        from core.registry import registry
+        from services.protocols import ISettingsService
+
+        if not registry.get(ISettingsService).settings.gravity_bot.send_guild_chat:
+            return
         if not self._connected or self._ws_thread is None:
             return
         self._seq += 1
@@ -384,6 +417,13 @@ class GravityBotService(QObject):
             t.wait(2_000)
 
     # ── Private ────────────────────────────────────────────────────────────────
+
+    @Slot(bool, str)
+    def _cache_raids_result(self, success: bool, body: str) -> None:
+        import time  # noqa: PLC0415
+        self._raids_cache = (success, body)
+        self._raids_cache_ts = time.monotonic()
+        self._raids_fetch_in_flight = False
 
     @Slot(bool)
     def _on_connected_changed(self, connected: bool) -> None:

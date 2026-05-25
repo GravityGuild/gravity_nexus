@@ -51,13 +51,12 @@ def build() -> int:
         "--windows-product-name=Gravity Nexus",
         f"--windows-file-version={_WIN_VERSION}",
         f"--windows-product-version={_WIN_VERSION}",
-        "--windows-file-description=EverQuest Overlay Parser",
+        "--windows-file-description=Gravity Nexus",
         f"--windows-icon-from-ico={ICON_ICO}",
         # PySide6 plugin
         "--enable-plugin=pyside6",
         # Bundle assets and stylesheet
         f"--include-data-dir={APP_DIR / 'assets'}=assets",
-        f"--include-data-files={APP_DIR / 'theme' / 'styles.qss'}=theme/styles.qss",
         # Follow all imports
         "--follow-imports",
         # Optimisation

@@ -32,7 +32,7 @@ class _TokenExchangeThread(QThread):
     def run(self) -> None:
         import httpx  # noqa: PLC0415
         try:
-            with httpx.Client(timeout=httpx.Timeout(30, connect=10)) as client:
+            with httpx.Client(timeout=httpx.Timeout(30, connect=10), trust_env=False) as client:
                 resp = client.post(
                     f"{self._base_url}/auth/token",
                     json={"code": self._code, "state": self._state},
@@ -70,7 +70,7 @@ class _RefreshThread(QThread):
     def run(self) -> None:
         import httpx  # noqa: PLC0415
         try:
-            with httpx.Client(timeout=httpx.Timeout(30, connect=10)) as client:
+            with httpx.Client(timeout=httpx.Timeout(30, connect=10), trust_env=False) as client:
                 resp = client.post(
                     f"{self._base_url}/auth/refresh",
                     json={"refresh_token": self._refresh_token},
@@ -177,6 +177,11 @@ class AuthManager(QObject):
         self._clear_keyring(username)
         self._username = None
         return False
+
+    @property
+    def username(self) -> Optional[str]:
+        """The display name of the currently authenticated user, or None."""
+        return self._username
 
     def get_access_token(self) -> Optional[str]:
         """Return the current access token, refreshing proactively if near expiry."""
@@ -286,6 +291,7 @@ class AuthManager(QObject):
 
         try:
             with httpx.Client(timeout=httpx.Timeout(30, connect=10)) as client:
+                log.info("Refreshing access token for user %s", username)
                 resp = client.post(
                     f"{self._bot_base_url.rstrip('/')}/auth/refresh",
                     json={"refresh_token": token},
@@ -337,6 +343,8 @@ class AuthManager(QObject):
         self._access_token = data["access_token"]
 
         try:
+            # Intentional: the client doesn't hold the server's signing key.
+            # The server validates the token on every API call; we only need exp.
             payload = pyjwt.decode(
                 data["access_token"], options={"verify_signature": False}
             )

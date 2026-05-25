@@ -1,4 +1,4 @@
-"""WhoEntry — represents a single player line from an EQ /who dump.
+"""WhoEntry — represents a single player line from an EQ /who.
 
 Parsed from the EverQuest log format produced by the ``/who`` command::
 
@@ -25,7 +25,7 @@ GRAVITY_GUILD = "Gravity"
 
 @dataclass
 class WhoEntry:
-    """Parsed representation of one player line from a ``/who`` dump.
+    """Parsed representation of one player line from a ``/who``.
 
     Attributes
     ----------

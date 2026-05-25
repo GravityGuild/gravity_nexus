@@ -35,13 +35,13 @@ log = logging.getLogger(__name__)
 
 # ── Compiled patterns ─────────────────────────────────────────────────────────
 
-# Start-of-dump marker (body after EQ timestamp is stripped)
+# Start-of-log marker (body after EQ timestamp is stripped)
 _WHO_START_RE: re.Pattern = re.compile(r"^Players on EverQuest:\s*$")
 
 # Separator line e.g. "---------------------------"
 _WHO_SEP_RE: re.Pattern = re.compile(r"^-+\s*$")
 
-# End-of-dump summary e.g. "There are 19 players in East Commonlands."
+# End-of-log summary e.g. "There are 19 players in East Commonlands."
 _WHO_END_RE: re.Pattern = re.compile(r"^There (?:are|is) \d+ players? in .+\.\s*$")
 
 # Individual player line:
@@ -135,7 +135,7 @@ class WhoListMatcher(LogMatcher):
 
         if not self._collecting:
             if _WHO_START_RE.match(body):
-                log.debug("Who-list dump started")
+                log.debug("Who-list started")
                 self._collecting = True
                 self._raw_lines = []
             return

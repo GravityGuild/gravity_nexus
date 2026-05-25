@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.registry import registry
+from feature_flags import feature_enabled
 from services.protocols import ISettingsService
 from services.mock_data_provider import MockDataProvider
 from theme.colors import ERROR, SUCCESS
@@ -56,6 +57,8 @@ class OverlaysPage(QWidget):
         self._svc = registry.get(ISettingsService)
         self._provider = mock_provider
         self._positioning_active = False
+        self._toggle_always_top: Optional[ToggleSwitch] = None
+        self._toggle_click_through: Optional[ToggleSwitch] = None
         self._build_ui()
         self._load_values()
 
@@ -120,11 +123,13 @@ class OverlaysPage(QWidget):
         self._toggle_enabled = ToggleSwitch(checked=True)
         global_card.add_layout(self._row("Enable overlays", self._toggle_enabled))
 
-        self._toggle_always_top = ToggleSwitch(checked=True)
-        global_card.add_layout(self._row("Always on top", self._toggle_always_top))
+        if feature_enabled("overlay_always_on_top", self._svc.settings):
+            self._toggle_always_top = ToggleSwitch(checked=True)
+            global_card.add_layout(self._row("Always on top", self._toggle_always_top))
 
-        self._toggle_click_through = ToggleSwitch(checked=False)
-        global_card.add_layout(self._row("Click-through mode (Windows)", self._toggle_click_through))
+        if feature_enabled("overlay_click_through", self._svc.settings):
+            self._toggle_click_through = ToggleSwitch(checked=False)
+            global_card.add_layout(self._row("Click-through mode (Windows)", self._toggle_click_through))
 
         # ── Card: Opacity ─────────────────────────────────────────────────────
         opacity_card = SettingsCard("Opacity", "Global overlay transparency.")
@@ -174,8 +179,10 @@ class OverlaysPage(QWidget):
     def _load_values(self) -> None:
         ov = self._svc.settings.overlay
         self._toggle_enabled.set_checked(ov.enabled, animated=False)
-        self._toggle_always_top.set_checked(ov.always_on_top, animated=False)
-        self._toggle_click_through.set_checked(ov.click_through, animated=False)
+        if self._toggle_always_top is not None:
+            self._toggle_always_top.set_checked(ov.always_on_top, animated=False)
+        if self._toggle_click_through is not None:
+            self._toggle_click_through.set_checked(ov.click_through, animated=False)
         pct = int(ov.opacity * 100)
         self._opacity_slider.setValue(pct)
         self._opacity_label.setText(f"{pct}%")
@@ -183,8 +190,10 @@ class OverlaysPage(QWidget):
     def _save(self) -> None:
         ov = self._svc.settings.overlay
         ov.enabled = self._toggle_enabled.is_checked()
-        ov.always_on_top = self._toggle_always_top.is_checked()
-        ov.click_through = self._toggle_click_through.is_checked()
+        if self._toggle_always_top is not None:
+            ov.always_on_top = self._toggle_always_top.is_checked()
+        if self._toggle_click_through is not None:
+            ov.click_through = self._toggle_click_through.is_checked()
         ov.opacity = self._opacity_slider.value() / 100.0
         self._svc.save()
 

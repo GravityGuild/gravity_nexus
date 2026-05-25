@@ -31,6 +31,7 @@ class _CallbackHTTPServer(HTTPServer):
     def __init__(self, *args, on_callback=None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.on_callback = on_callback
+        self._handled = False
 
 
 class _CallbackHandler(BaseHTTPRequestHandler):
@@ -41,6 +42,12 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
+
+        if server._handled:
+            self.send_response(404)
+            self.end_headers()
+            return
+        server._handled = True
 
         params = parse_qs(parsed.query)
         code = params.get("code",  [None])[0]
