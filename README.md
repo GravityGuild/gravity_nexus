@@ -2,6 +2,8 @@
 
 Raid tools and integration with Gravity's Discord bot and DKP website, for Project 1999.
 
+![Gravity Nexus](docs/images/gravity_nexus_main_window.PNG)
+
 ---
 
 ## Table of Contents

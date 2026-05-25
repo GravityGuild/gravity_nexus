@@ -73,20 +73,23 @@ class _UpdateCheckerThread(QThread):
                 self.no_update.emit()
                 return
 
-            # Find the Windows installer asset
+            # Find the Windows installer asset.
+            # Use the API asset URL (api.github.com/…/assets/{id}) rather than
+            # browser_download_url (github.com/…) — the API URL accepts Bearer
+            # auth and returns a signed redirect that works for private repos.
             assets = data.get("assets", [])
-            download_url = ""
+            asset_api_url = ""
             for asset in assets:
                 name = asset.get("name", "")
                 if name.startswith("GravityNexus_Setup_") and name.endswith(".exe"):
-                    download_url = asset.get("browser_download_url", "")
+                    asset_api_url = asset.get("url", "")
                     break
 
-            if not download_url:
+            if not asset_api_url:
                 self.error.emit(f"No Windows installer asset found for release {latest}")
                 return
 
-            self.result.emit(latest, download_url)
+            self.result.emit(latest, asset_api_url)
 
         except requests.RequestException as exc:
             self.error.emit(f"Network error during update check: {exc}")
@@ -113,9 +116,21 @@ class _UpdateDownloaderThread(QThread):
             dest_dir.mkdir(exist_ok=True)
             dest = dest_dir / f"GravityNexus_Setup_{self._version}.exe"
 
-            resp = requests.get(
+            # self._url is the API asset URL (api.github.com/…/assets/{id}).
+            # Requesting it with Accept: application/octet-stream and auth
+            # returns a 302 to a signed CDN URL.  The CDN URL is self-signed
+            # and must be fetched without the Authorization header.
+            redirect = requests.get(
                 self._url,
-                headers=_github_headers(self._token),
+                headers={**_github_headers(self._token), "Accept": "application/octet-stream"},
+                allow_redirects=False,
+                timeout=30,
+            )
+            cdn_url = redirect.headers.get("Location") or self._url
+
+            resp = requests.get(
+                cdn_url,
+                headers={"User-Agent": _USER_AGENT},
                 stream=True,
                 timeout=120,
             )
