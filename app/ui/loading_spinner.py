@@ -99,7 +99,7 @@ class _CardWidget(QWidget):
 _FUNNY_SAYINGS = [
     "Looking for more clerics…",
     "Cothing to trips…",
-    "BPing yael…",
+    "Batphoning Master Yael…",
     "Tunnelquesting…",
     "Spending Diikembe's DKP…",
     "Sending buff requests…",
@@ -108,8 +108,9 @@ _FUNNY_SAYINGS = [
     "You feel yourself starting to appear…",
     "Train to zone!",
     "Sending Valick back to VP…",
-    "Thanking Heelur for making me…",
-    "Who let Kueryenya ramp tank?"
+    "Who let Kueryenya ramp tank vindi?",
+    "Trading nightmare hides to Pehpar…",
+    "Allishya is the main tank /nod",
 ]
 
 

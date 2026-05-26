@@ -15,7 +15,6 @@ class GeneralSettings:
     minimize_to_tray: bool = True
     start_with_windows: bool = False
     check_for_updates: bool = True
-    github_token: str = ""         # stored in credential store, not plain settings
     last_update_check_timestamp: float = 0.0
     update_check_interval_hours: int = 24
     debug_logging: bool = False

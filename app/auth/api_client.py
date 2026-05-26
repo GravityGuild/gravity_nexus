@@ -70,6 +70,10 @@ class ApiClient:
         except Exception:
             pass
 
+    @property
+    def base_url(self) -> str:
+        return self._base
+
     def _headers(self) -> dict:
         token = self._auth.get_access_token()
         return {"Authorization": f"Bearer {token}"} if token else {}

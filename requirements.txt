@@ -1,10 +1,5 @@
-PySide6>=6.7.0
-httpx>=0.27.0
-websockets>=12.0
-keyring>=24.0.0
-PyJWT>=2.8.0
-python-dotenv>=1.0.0
-requests
+# Runtime dependencies (also bundled into the exe by Nuitka)
+-r requirements-runtime.txt
 
-# TODO: Build Requirements
+# Build tooling — not bundled, only needed to compile the executable
 nuitka>=2.0.0

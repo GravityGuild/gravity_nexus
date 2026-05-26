@@ -211,10 +211,11 @@ def main() -> int:
     from ui.login_dialog import LoginDialog     # noqa: PLC0415
 
     website_base_url = os.environ.get("EQDKP_WEBSITE_URL", "https://gravityp99.com")
-    gravity_bot_url = os.environ.get("GRAVITY_BOT_URL", "https://bot.gravityp99.com")
+    gravity_bot_url = os.environ.get("GRAVITY_BOT_URL", "https://gravityp99.com")
     auth = AuthManager(bot_base_url=gravity_bot_url, website_base_url=website_base_url)
     registry.register(IAuthService, auth)
     api = ApiClient(auth, gravity_bot_url)
+    update_svc.set_api_client(api)
 
     silent_ok = _run_silent_login(auth)
 
@@ -225,6 +226,9 @@ def main() -> int:
         if dialog.exec() != QDialog.DialogCode.Accepted:
             api.close()
             sys.exit(0)
+        spinner = LoadingSpinner()
+        spinner.show()
+        app.processEvents()
 
     # ── First-run setup wizard ────────────────────────────────────────────────
     if not settings_svc.settings.setup_wizard_completed:
@@ -262,10 +266,6 @@ def main() -> int:
     if settings_svc.settings.gravity_bot.ws_enabled and auth.is_authenticated():
         import time as _ws_time
 
-        if spinner is not None:
-            spinner.set_status("Connecting to Gravity Bot…")
-            app.processEvents()
-
         _ws_resolved = _threading.Event()
 
         def _on_ws_startup_result(_: bool) -> None:
@@ -293,7 +293,7 @@ def main() -> int:
         spinner.close()
         spinner = None
 
-    window.show()
+    window.bring_to_foreground()
 
     # System tray icon
     tray_icon_path = get_asset("icons/only_logo.ico")
@@ -316,7 +316,7 @@ def main() -> int:
 
     # ── Update service ────────────────────────────────────────────────────────
     update_svc.update_available.connect(
-        lambda version, _url: tray.showMessage(
+        lambda version, _asset: tray.showMessage(
             "Gravity Nexus",
             f"Update available: v{version}. Go to Settings → General to install.",
             QSystemTrayIcon.MessageIcon.Information,

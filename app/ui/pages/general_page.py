@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
+    QProgressBar,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -38,7 +38,7 @@ class GeneralPage(QWidget):
     # Update state: "idle" | "checking" | "available" | "downloading" | "ready" | "error"
     _update_state: str = "idle"
     _pending_version: str = ""
-    _pending_url: str = ""
+    _pending_asset: str = ""
     _pending_path: str = ""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -128,7 +128,7 @@ class GeneralPage(QWidget):
         # ── Card: Software Updates ────────────────────────────────────────────
         update_card = SettingsCard(
             "Software Updates",
-            "Download and install new releases from GitHub.",
+            "Download and install new releases.",
         )
         vl.addWidget(update_card)
 
@@ -146,27 +146,12 @@ class GeneralPage(QWidget):
         status_row.addWidget(self._update_action_btn)
         update_card.add_layout(status_row)
 
-        token_label = QLabel("GitHub Personal Access Token")
-        update_card.add_widget(token_label)
-
-        token_row = QHBoxLayout()
-        self._github_token_edit = ThemedLineEdit("Paste token here…")
-        self._github_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self._github_token_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        clear_token_btn = ThemedButton("Clear", ThemedButton.VARIANT_SECONDARY)
-        clear_token_btn.clicked.connect(self._clear_github_token)
-        token_row.addWidget(self._github_token_edit)
-        token_row.addWidget(clear_token_btn)
-        update_card.add_layout(token_row)
-
-        token_hint = ThemedLabel(
-            "Required to enable update checking. "
-            "Saved securely in your system credential store.",
-            font_size=FontSize.SMALL,
-            color_role=ColorRole.TEXT_MUTED,
-            word_wrap=True,
-        )
-        update_card.add_widget(token_hint)
+        self._download_progress_bar = QProgressBar()
+        self._download_progress_bar.setRange(0, 100)
+        self._download_progress_bar.setTextVisible(False)
+        self._download_progress_bar.setFixedHeight(6)
+        self._download_progress_bar.hide()
+        update_card.add_widget(self._download_progress_bar)
 
         save_btn = ThemedButton("Save Changes", ThemedButton.VARIANT_PRIMARY)
         save_btn.clicked.connect(self._save)
@@ -201,8 +186,6 @@ class GeneralPage(QWidget):
             self._svc.settings.gravity_bot.send_guild_chat, animated=False
         )
         self._refresh_discovery_label(g.log_directory)
-        if g.github_token:
-            self._github_token_edit.setText(g.github_token)
         self._refresh_update_controls()
 
     def _save(self) -> None:
@@ -211,29 +194,14 @@ class GeneralPage(QWidget):
         g.auto_start_parser = self._toggle_auto_start.is_checked()
         g.start_with_windows = self._toggle_start_windows.is_checked()
         g.minimize_to_tray = self._toggle_minimize_tray.is_checked()
-        g.github_token = self._github_token_edit.text().strip()
-        g.check_for_updates = self._toggle_check_updates.is_checked() and bool(g.github_token)
+        g.check_for_updates = self._toggle_check_updates.is_checked()
         self._svc.settings.gravity_bot.send_guild_chat = self._toggle_send_guild_chat.is_checked()
         self._svc.save()
         self._refresh_update_controls()
 
-    def _clear_github_token(self) -> None:
-        self._github_token_edit.clear()
-        self._svc.settings.general.github_token = ""
-        self._svc.settings.general.check_for_updates = False
-        self._svc.save()
-        self._refresh_update_controls()
-
     def _refresh_update_controls(self) -> None:
-        has_token = bool(self._svc.settings.general.github_token)
-        self._toggle_check_updates.setEnabled(has_token)
-        if not has_token:
-            self._toggle_check_updates.set_checked(False, animated=False)
-            self._update_action_btn.setEnabled(False)
-            self._update_action_btn.setText("Check Now")
-            self._update_state = "idle"
-            self._update_status_lbl.setText("Enter a GitHub token to enable update checking.")
-        elif self._update_state == "idle":
+        self._toggle_check_updates.setEnabled(True)
+        if self._update_state == "idle":
             self._update_action_btn.setEnabled(True)
             self._update_status_lbl.setText(
                 self._format_last_checked(self._svc.settings.general.last_update_check_timestamp)
@@ -291,7 +259,13 @@ class GeneralPage(QWidget):
             self._update_action_btn.setEnabled(False)
             self._update_svc.check_for_updates()
         elif self._update_state == "available":
-            self._update_svc.download_update(self._pending_version, self._pending_url)
+            self._update_state = "downloading"
+            self._download_progress_bar.setRange(0, 0)  # indeterminate until first progress signal
+            self._download_progress_bar.show()
+            self._update_status_lbl.setText(f"Downloading v{self._pending_version}…")
+            self._update_action_btn.setText("Downloading…")
+            self._update_action_btn.setEnabled(False)
+            self._update_svc.download_update(self._pending_version, self._pending_asset)
         elif self._update_state == "ready":
             reply = QMessageBox.question(
                 self,
@@ -304,9 +278,9 @@ class GeneralPage(QWidget):
                 self._update_svc.install_and_restart(self._pending_path)
 
     @Slot(str, str)
-    def _on_update_available(self, version: str, url: str) -> None:
+    def _on_update_available(self, version: str, asset_name: str) -> None:
         self._pending_version = version
-        self._pending_url = url
+        self._pending_asset = asset_name
         self._update_state = "available"
         self._update_status_lbl.setText(f"Update available: v{version}")
         self._update_status_lbl.setProperty("colorRole", "success")
@@ -317,6 +291,7 @@ class GeneralPage(QWidget):
     def _on_update_downloaded(self, version: str, path: str) -> None:
         self._pending_path = path
         self._update_state = "ready"
+        self._download_progress_bar.hide()
         self._update_status_lbl.setText(f"v{version} ready to install — app will restart")
         self._update_action_btn.setText("Install Now")
         self._update_action_btn.setEnabled(True)
@@ -324,14 +299,15 @@ class GeneralPage(QWidget):
     @Slot(int)
     def _on_download_progress(self, pct: int) -> None:
         self._update_state = "downloading"
-        self._update_status_lbl.setText(f"Downloading v{self._pending_version}… {pct}%")
-        self._update_action_btn.setText("Downloading…")
-        self._update_action_btn.setEnabled(False)
+        if self._download_progress_bar.maximum() == 0:
+            self._download_progress_bar.setRange(0, 100)
+        self._download_progress_bar.setValue(pct)
 
     @Slot(str)
     def _on_update_status(self, msg: str) -> None:
         if self._update_state in ("available", "downloading", "ready", "error"):
             return
+        self._download_progress_bar.hide()
         self._update_status_lbl.setText(msg)
         self._update_action_btn.setText("Check Now")
         self._update_action_btn.setEnabled(True)
@@ -340,6 +316,7 @@ class GeneralPage(QWidget):
     @Slot(str)
     def _on_update_error(self, msg: str) -> None:
         self._update_state = "error"
+        self._download_progress_bar.hide()
         self._update_status_lbl.setText(f"Error: {msg}")
         self._update_action_btn.setText("Try Again")
         self._update_action_btn.setEnabled(True)

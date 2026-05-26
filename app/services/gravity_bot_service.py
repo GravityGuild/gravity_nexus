@@ -127,7 +127,7 @@ class _WsThread(QThread):
         backoff = 1.0
 
         while self._running:
-            bot_url = os.environ.get("GRAVITY_BOT_URL", "https://bot.gravityp99.com")
+            bot_url = os.environ.get("GRAVITY_BOT_URL", "https://gravityp99.com")
 
             token = self._get_token()
             if not token:

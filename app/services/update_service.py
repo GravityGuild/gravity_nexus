@@ -1,14 +1,13 @@
-"""UpdateService — checks GitHub Releases for new versions and manages installation."""
+"""UpdateService — checks Gravity Bot API for new versions and manages installation."""
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import requests
 
@@ -16,19 +15,14 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 from _version import __version__
 
+if TYPE_CHECKING:
+    from auth.api_client import ApiClient
+
 log = logging.getLogger(__name__)
 
-_GITHUB_API_URL = "https://api.github.com/repos/GravityGuild/gravity_nexus/releases/latest"
+_LATEST_PATH = "/api/v1/updates/latest"
+_DOWNLOAD_PATH = "/api/v1/updates/download/v{version}"
 _USER_AGENT = f"GravityNexus/{__version__}"
-
-
-def _github_headers(token: str = "") -> dict[str, str]:
-    """Build GitHub API request headers, preferring an explicit token over env vars."""
-    headers: dict[str, str] = {"User-Agent": _USER_AGENT}
-    resolved = token or os.environ.get("GRAVITY_NEXUS_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if resolved:
-        headers["Authorization"] = f"Bearer {resolved}"
-    return headers
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
@@ -36,30 +30,32 @@ def _parse_version(v: str) -> tuple[int, ...]:
 
 
 class _UpdateCheckerThread(QThread):
-    """Background thread: fetches latest GitHub release and compares to current version."""
+    """Background thread: fetches latest release from Gravity Bot API and compares versions."""
 
-    result = Signal(str, str)  # (version, download_url)
+    result = Signal(str, str)  # (version, asset_name)
     no_update = Signal()
     error = Signal(str)
 
-    def __init__(self, token: str = "", parent: Optional[QObject] = None) -> None:
+    def __init__(self, base_url: str, token: str, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
+        self._base_url = base_url
         self._token = token
 
     def run(self) -> None:
         try:
-            resp = requests.get(
-                _GITHUB_API_URL,
-                headers=_github_headers(self._token),
-                timeout=15,
-            )
+            url = f"{self._base_url}{_LATEST_PATH}"
+            headers = {
+                "User-Agent": _USER_AGENT,
+                "Authorization": f"Bearer {self._token}",
+            }
+            resp = requests.get(url, headers=headers, timeout=15)
             resp.raise_for_status()
             data = resp.json()
 
-            tag = data.get("tag_name", "")
+            tag = data.get("version", "")
             latest = tag.lstrip("v")
             if not latest:
-                self.error.emit("Invalid release tag in GitHub response")
+                self.error.emit("Invalid version in API response")
                 return
 
             try:
@@ -73,23 +69,19 @@ class _UpdateCheckerThread(QThread):
                 self.no_update.emit()
                 return
 
-            # Find the Windows installer asset.
-            # Use the API asset URL (api.github.com/…/assets/{id}) rather than
-            # browser_download_url (github.com/…) — the API URL accepts Bearer
-            # auth and returns a signed redirect that works for private repos.
             assets = data.get("assets", [])
-            asset_api_url = ""
+            asset_name = ""
             for asset in assets:
                 name = asset.get("name", "")
                 if name.startswith("GravityNexus_Setup_") and name.endswith(".exe"):
-                    asset_api_url = asset.get("url", "")
+                    asset_name = name
                     break
 
-            if not asset_api_url:
+            if not asset_name:
                 self.error.emit(f"No Windows installer asset found for release {latest}")
                 return
 
-            self.result.emit(latest, asset_api_url)
+            self.result.emit(latest, asset_name)
 
         except requests.RequestException as exc:
             self.error.emit(f"Network error during update check: {exc}")
@@ -104,10 +96,18 @@ class _UpdateDownloaderThread(QThread):
     done = Signal(str)      # absolute path to installer
     error = Signal(str)
 
-    def __init__(self, version: str, url: str, token: str = "", parent: Optional[QObject] = None) -> None:
+    def __init__(
+        self,
+        version: str,
+        asset_name: str,
+        base_url: str,
+        token: str,
+        parent: Optional[QObject] = None,
+    ) -> None:
         super().__init__(parent)
         self._version = version
-        self._url = url
+        self._asset_name = asset_name
+        self._base_url = base_url
         self._token = token
 
     def run(self) -> None:
@@ -116,21 +116,15 @@ class _UpdateDownloaderThread(QThread):
             dest_dir.mkdir(exist_ok=True)
             dest = dest_dir / f"GravityNexus_Setup_{self._version}.exe"
 
-            # self._url is the API asset URL (api.github.com/…/assets/{id}).
-            # Requesting it with Accept: application/octet-stream and auth
-            # returns a 302 to a signed CDN URL.  The CDN URL is self-signed
-            # and must be fetched without the Authorization header.
-            redirect = requests.get(
-                self._url,
-                headers={**_github_headers(self._token), "Accept": "application/octet-stream"},
-                allow_redirects=False,
-                timeout=30,
-            )
-            cdn_url = redirect.headers.get("Location") or self._url
-
+            url = f"{self._base_url}{_DOWNLOAD_PATH.format(version=self._version)}"
+            headers = {
+                "User-Agent": _USER_AGENT,
+                "Authorization": f"Bearer {self._token}",
+            }
             resp = requests.get(
-                cdn_url,
-                headers={"User-Agent": _USER_AGENT},
+                url,
+                headers=headers,
+                params={"asset": self._asset_name},
                 stream=True,
                 timeout=120,
             )
@@ -162,17 +156,19 @@ class UpdateService(QObject):
     """Manages application update checking and installation.
 
     Lifecycle:
-        1. ``start()`` — call after the main window is visible; schedules the
+        1. ``set_api_client(api)`` — call after the ApiClient is created to wire up
+           the authenticated HTTP client.
+        2. ``start()`` — call after the main window is visible; schedules the
            first background check based on ``update_check_interval_hours``.
-        2. ``check_for_updates()`` — fires ``_UpdateCheckerThread`` immediately.
-        3. ``download_update(version, url)`` — fires ``_UpdateDownloaderThread``.
-        4. ``install_and_restart(path)`` — launches installer silently then emits
+        3. ``check_for_updates()`` — fires ``_UpdateCheckerThread`` immediately.
+        4. ``download_update(version, asset_name)`` — fires ``_UpdateDownloaderThread``.
+        5. ``install_and_restart(path)`` — launches installer silently then emits
            ``restart_requested`` so the composition root can call
            ``window.force_quit()``.
-        5. ``shutdown()`` — stop all background threads on app close.
+        6. ``shutdown()`` — stop all background threads on app close.
     """
 
-    update_available = Signal(str, str)   # (version, download_url)
+    update_available = Signal(str, str)   # (version, asset_name)
     update_downloaded = Signal(str, str)  # (version, installer_path)
     download_progress = Signal(int)       # 0–100
     update_status = Signal(str)
@@ -182,15 +178,22 @@ class UpdateService(QObject):
     def __init__(self, settings_svc) -> None:
         super().__init__()
         self._settings_svc = settings_svc
+        self._api_client: Optional[ApiClient] = None
         self._checker: Optional[_UpdateCheckerThread] = None
         self._downloader: Optional[_UpdateDownloaderThread] = None
         self._schedule_timer: Optional[QTimer] = None
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
+    def set_api_client(self, api_client: ApiClient) -> None:
+        self._api_client = api_client
+
     def start(self) -> None:
         """Schedule or immediately run the first update check."""
         if not self._settings_svc.settings.general.check_for_updates:
+            return
+        if self._api_client is None:
+            log.warning("UpdateService.start() called before set_api_client()")
             return
 
         general = self._settings_svc.settings.general
@@ -214,27 +217,37 @@ class UpdateService(QObject):
         """Immediately trigger an update check. No-op if one is already running."""
         if self._checker is not None:
             return
+        if self._api_client is None:
+            log.warning("check_for_updates() called before set_api_client()")
+            return
 
         log.info("Checking for updates (current: v%s)", __version__)
 
-        token = self._settings_svc.settings.general.github_token
-        self._checker = _UpdateCheckerThread(token=token, parent=self)
+        base_url = self._api_client.base_url
+        token = self._api_client._auth.get_access_token() or ""
+        self._checker = _UpdateCheckerThread(base_url=base_url, token=token, parent=self)
         self._checker.result.connect(self._on_update_found)
         self._checker.no_update.connect(self._on_no_update)
         self._checker.error.connect(self._on_check_error)
         self._checker.finished.connect(self._on_checker_finished)
         self._checker.start()
 
-    def download_update(self, version: str, url: str) -> None:
-        """Start downloading the installer for *version* from *url*."""
+    def download_update(self, version: str, asset_name: str) -> None:
+        """Start downloading the installer for *version* identified by *asset_name*."""
         if self._downloader is not None:
             return
+        if self._api_client is None:
+            log.warning("download_update() called before set_api_client()")
+            return
 
-        log.info("Downloading update v%s", version)
+        log.info("Downloading update v%s (%s)", version, asset_name)
         self.update_status.emit(f"Downloading v{version}…")
 
-        token = self._settings_svc.settings.general.github_token
-        self._downloader = _UpdateDownloaderThread(version, url, token=token, parent=self)
+        base_url = self._api_client.base_url
+        token = self._api_client._auth.get_access_token() or ""
+        self._downloader = _UpdateDownloaderThread(
+            version, asset_name, base_url, token=token, parent=self
+        )
         self._downloader.progress.connect(self.download_progress)
         self._downloader.done.connect(lambda path: self._on_download_done(version, path))
         self._downloader.error.connect(self._on_download_error)
@@ -276,10 +289,10 @@ class UpdateService(QObject):
     # ── Internal slots ─────────────────────────────────────────────────────────
 
     @Slot(str, str)
-    def _on_update_found(self, version: str, url: str) -> None:
+    def _on_update_found(self, version: str, asset_name: str) -> None:
         log.info("Update available: v%s", version)
         self._record_check_timestamp()
-        self.update_available.emit(version, url)
+        self.update_available.emit(version, asset_name)
         self.update_status.emit(f"Update available: v{version}")
 
     @Slot()
