@@ -2,4 +2,4 @@
 -r requirements-runtime.txt
 
 # Build tooling — not bundled, only needed to compile the executable
-nuitka>=2.0.0
+nuitka[onefile]>=2.0.0

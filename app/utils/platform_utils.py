@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +81,40 @@ def apply_startup_with_windows(enabled: bool) -> None:
         winreg.CloseKey(key)
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not update startup registry key: %s", exc)
+
+
+def _is_packaged() -> bool:
+    """True when running as a compiled/installed executable (PyInstaller or Nuitka)."""
+    if getattr(sys, "frozen", False):
+        return True
+    try:
+        return bool(__compiled__)  # type: ignore[name-defined]  # noqa: F821
+    except NameError:
+        return False
+
+
+def get_log_dir() -> Path:
+    """Directory where Gravity Nexus writes its rotating log file.
+
+    Installed (packaged): %LOCALAPPDATA%\\GravityNexus\\logs\\
+    Development:          <project_root>/logs/
+    """
+    if _is_packaged():
+        return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "GravityNexus" / "logs"
+    return Path(__file__).resolve().parent.parent.parent / "logs"
+
+
+def open_log_folder() -> None:
+    """Open the Gravity Nexus log folder in Windows Explorer. No-op elsewhere."""
+    if not _IS_WINDOWS:
+        return
+    log_dir = get_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        import subprocess  # noqa: PLC0415
+        subprocess.Popen(["explorer", str(log_dir)])  # noqa: S603, S607
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not open log folder: %s", exc)
 
 
 def set_app_user_model_id(app_id: str) -> None:

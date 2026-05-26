@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 import sys
 from pathlib import Path
 
@@ -73,7 +74,7 @@ else:
 from theme.theme_manager import ThemeManager
 from ui.loading_spinner import LoadingSpinner
 from ui.main_window import MainWindow
-from utils.platform_utils import set_app_user_model_id
+from utils.platform_utils import get_log_dir, set_app_user_model_id
 from utils.resource_utils import get_asset
 
 # ── Composition root — only place that imports concrete service classes ────────
@@ -85,18 +86,71 @@ from services.settings_service import SettingsService
 from services.update_service import UpdateService
 
 # ── Logging ────────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
-    datefmt="%H:%M:%S",
-)
+_file_handler: RotatingFileHandler | None = None
+
+
+def _configure_logging() -> Path:
+    """Set up root logger with a rotating file handler (WARNING+) and, in dev,
+    a console handler (INFO+). Returns the log file path."""
+    global _file_handler
+
+    log_dir = get_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "gravity_nexus.log"
+
+    file_fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    _file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=1_000_000,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    _file_handler.setLevel(logging.WARNING)
+    _file_handler.setFormatter(file_fmt)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(_file_handler)
+
+    if not getattr(sys, "frozen", False):
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        console.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+            datefmt="%H:%M:%S",
+        ))
+        root.addHandler(console)
+
+    return log_path
+
+
+def _install_excepthook() -> None:
+    """Redirect unhandled Python exceptions to the log file."""
+    _log = logging.getLogger("gravity_nexus")
+
+    def _hook(exc_type, exc_value, exc_tb):  # type: ignore[no-untyped-def]
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        _log.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_tb))
+
+    sys.excepthook = _hook
+
+
+_configure_logging()
+_install_excepthook()
 log = logging.getLogger("gravity_nexus")
 
 
 def _apply_debug_logging(settings_svc: "SettingsService") -> None:
-    """Set root logger level based on the persisted debug_logging setting."""
+    """Set root logger and file handler level based on the persisted debug_logging setting."""
     if settings_svc.settings.general.debug_logging:
         logging.getLogger().setLevel(logging.DEBUG)
+        if _file_handler is not None:
+            _file_handler.setLevel(logging.DEBUG)
         log.info("Debug logging ENABLED (restored from settings).")
 
 

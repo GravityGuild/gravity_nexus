@@ -90,7 +90,7 @@ def install_deps() -> None:
     _run([VENV_PYTHON, "-m", "pip", "install", "-r", "requirements-runtime.txt"])
     print()
     print("  Installing nuitka (build tool) …")
-    _run([VENV_PYTHON, "-m", "pip", "install", "nuitka"])
+    _run([VENV_PYTHON, "-m", "pip", "install", "nuitka[onefile]"])
 
 
 def build_exe(version: str) -> None:

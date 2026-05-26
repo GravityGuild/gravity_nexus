@@ -28,6 +28,7 @@ from ui.widgets.themed_widgets import ThemedComboBox
 from ui.widgets.toggle_switch import ToggleSwitch
 from _version import __version__
 from feature_flags import feature_enabled
+from utils.platform_utils import get_log_dir, open_log_folder
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -265,6 +266,26 @@ class AdvancedPage(QWidget):
         self._build_parser_status(parser_card)
         vl.addWidget(parser_card)
 
+        # ── Card: Diagnostics ─────────────────────────────────────────────────
+        diag_card = SettingsCard(
+            "Logging",
+            "Warnings and errors are written here. Share this file when reporting a bug.",
+        )
+        vl.addWidget(diag_card)
+
+        log_path_lbl = ThemedLabel(
+            str(get_log_dir() / "gravity_nexus.log"),
+            font_size=FontSize.SMALL,
+            color_role=ColorRole.TEXT_MUTED,
+            word_wrap=True,
+        )
+        diag_card.add_widget(log_path_lbl)
+
+        open_log_btn = ThemedButton("Open Log Folder", ThemedButton.VARIANT_SECONDARY)
+        open_log_btn.clicked.connect(open_log_folder)
+        diag_card.add_widget(open_log_btn)
+
+        # ── Card: Performance   ───────────────────────────────────────────────
         perf_card = SettingsCard("Performance", "Tuning for long-session stability.")
 
         # Debug logging toggle — wired up to the Python root logger
