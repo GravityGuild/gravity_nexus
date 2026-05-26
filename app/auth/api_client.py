@@ -46,16 +46,16 @@ class ApiClient:
         return self._request("POST", path, json=json, **kwargs)
 
     def warmup(self) -> None:
-        """GET /auth/me to validate the token and pre-warm the connection pool.
+        """GET /api/v1/auth/me to validate the token and pre-warm the connection pool.
 
         Call this synchronously while a startup spinner is visible so the pool
         is live before the user can interact with the UI.
         """
         try:
             t0 = time.perf_counter()
-            resp = self.get("/auth/me")
+            resp = self.get("/api/v1/auth/me")
             ms = (time.perf_counter() - t0) * 1000
-            log.info("connection warmup: GET /auth/me status=%d  %.1f ms", resp.status_code, ms)
+            log.info("connection warmup: GET /api/v1/auth/me status=%d  %.1f ms", resp.status_code, ms)
         except Exception as exc:  # noqa: BLE001
             log.warning("connection warmup failed: %s", exc)
 

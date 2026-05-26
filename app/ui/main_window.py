@@ -308,8 +308,11 @@ class MainWindow(QWidget):
         full_who_log: str = arg_vals[1]
         """Show (or replace) the raid submit overlay."""
         # Pre-fetch raids now so the overlay dropdown is ready (or nearly so) by
-        # the time the user sees it.
-        self._bot_svc.fetch_raids()
+        # the time the user sees it. Use the same params as the overlay so the
+        # cache hit is valid when the overlay calls fetch_raids_cached().
+        from datetime import datetime, timedelta, timezone
+        _date_from = (datetime.now(timezone.utc) - timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%S")
+        self._bot_svc.fetch_raids(date_from=_date_from, limit=5)
         if self._raid_overlay is not None:
             try:
                 self._raid_overlay.close()

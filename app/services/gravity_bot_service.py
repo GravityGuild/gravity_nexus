@@ -134,7 +134,7 @@ class _WsThread(QThread):
                 self.msleep(2_000)
                 continue
 
-            ws_url = _to_ws_url(bot_url.rstrip("/")) + "/ws"
+            ws_url = _to_ws_url(bot_url.rstrip("/")) + "/api/ws"
 
             try:
                 ws = ws_connect(
@@ -206,6 +206,7 @@ class _RestSubmitThread(QThread):
         request_url: str,
         request_body: dict | None = None,
         headers: dict | None = None,
+        params: dict | None = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -214,6 +215,7 @@ class _RestSubmitThread(QThread):
         self._request_url = request_url
         self._request_body = request_body
         self._headers = headers or {}
+        self._params = params
 
     def run(self) -> None:
         import time  # noqa: PLC0415
@@ -222,7 +224,7 @@ class _RestSubmitThread(QThread):
             if self._request_type == HttpRequestType.POST:
                 resp = self._api.post(self._request_url, json=self._request_body, headers=self._headers)
             elif self._request_type == HttpRequestType.GET:
-                resp = self._api.get(self._request_url)
+                resp = self._api.get(self._request_url, params=self._params)
             else:
                 raise ValueError(f"Unhandled request type: {self._request_type}")
             http_ms = (time.perf_counter() - t0) * 1000
@@ -328,16 +330,22 @@ class GravityBotService(QObject):
             self._ws_thread = None
         log.info("Gravity Bot disconnected")
 
-    def fetch_raids(self) -> None:
+    def fetch_raids(self, date_from: str | None = None, limit: int | None = None) -> None:
         """Non-blocking GET of /api/raids from the bot."""
         import time  # noqa: PLC0415
         t0 = time.perf_counter()
         self._raids_cache = None  # invalidate stale cache before a fresh request
         self._raids_fetch_in_flight = True
+        params: dict = {}
+        if date_from is not None:
+            params["date_from"] = date_from
+        if limit is not None:
+            params["limit"] = limit
         thread = _RestSubmitThread(
             api=self._api,
             request_type=HttpRequestType.GET,
-            request_url="/api/raids",
+            request_url="/api/v1/raids",
+            params=params or None,
             parent=self,
         )
         thread.submit_done.connect(self.raids_fetched)
@@ -346,7 +354,7 @@ class GravityBotService(QObject):
         thread.start()
         log.debug("fetch_raids: thread started in %.2f ms", (time.perf_counter() - t0) * 1000)
 
-    def fetch_raids_cached(self, max_age_secs: float = 30.0) -> None:
+    def fetch_raids_cached(self, max_age_secs: float = 30.0, date_from: str | None = None, limit: int | None = None) -> None:
         """Emit raids_fetched from cache if fresh; otherwise call fetch_raids().
 
         Use this from the overlay so a pre-triggered fetch_raids() call from
@@ -364,14 +372,14 @@ class GravityBotService(QObject):
         if self._raids_fetch_in_flight:
             log.debug("fetch_raids_cached: fetch already in flight, waiting for signal")
         else:
-            self.fetch_raids()
+            self.fetch_raids(date_from=date_from, limit=limit)
 
     def submit_raid_log(self, channel_id: int, full_who_log: str) -> None:
         """Non-blocking POST of the who-log to the bot's raid attendance endpoint."""
         thread = _RestSubmitThread(
             api=self._api,
             request_type=HttpRequestType.POST,
-            request_url=f"/api/raids/{channel_id}/attendance",
+            request_url=f"/api/v1/raids/{channel_id}/attendance",
             request_body={"raidlog": full_who_log},
             headers={"X-Source": "gravitynexus"},
             parent=self,
