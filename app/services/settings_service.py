@@ -22,8 +22,6 @@ from PySide6.QtCore import QSettings
 
 _BOT_KEYRING_SERVICE = "gravity_nexus"
 _BOT_KEYRING_KEY = "bot_auth_token"
-_GITHUB_KEYRING_SERVICE = "gravity_nexus"
-_GITHUB_KEYRING_KEY = "github_token"
 
 from models.settings_model import AppSettings
 
@@ -106,10 +104,6 @@ class SettingsService:
         stored_bot_token = keyring.get_password(_BOT_KEYRING_SERVICE, _BOT_KEYRING_KEY)
         if stored_bot_token:
             s.gravity_bot.auth_token = stored_bot_token
-
-        stored_github_token = keyring.get_password(_GITHUB_KEYRING_SERVICE, _GITHUB_KEYRING_KEY)
-        if stored_github_token:
-            s.general.github_token = stored_github_token
 
         # Parsing
         q.beginGroup("parsing")
@@ -208,14 +202,6 @@ class SettingsService:
         else:
             try:
                 keyring.delete_password(_BOT_KEYRING_SERVICE, _BOT_KEYRING_KEY)
-            except keyring.errors.PasswordDeleteError:
-                pass
-
-        if s.general.github_token:
-            keyring.set_password(_GITHUB_KEYRING_SERVICE, _GITHUB_KEYRING_KEY, s.general.github_token)
-        else:
-            try:
-                keyring.delete_password(_GITHUB_KEYRING_SERVICE, _GITHUB_KEYRING_KEY)
             except keyring.errors.PasswordDeleteError:
                 pass
 

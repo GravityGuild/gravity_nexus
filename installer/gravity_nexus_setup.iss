@@ -87,7 +87,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; ── [Tasks] ──────────────────────────────────────────────────────────────────
 
 [Tasks]
-Name: "desktopicon";    Description: "Create a &desktop shortcut";           GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon";    Description: "Create a &desktop shortcut";           GroupDescription: "Additional shortcuts:"
 Name: "startupicon";   Description: "Launch {#AppName} when Windows starts"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 ; ── [Files] ──────────────────────────────────────────────────────────────────
@@ -173,5 +173,58 @@ begin
   FindAndStopProcess('{#AppExeName}');
   // Give the process a moment to fully exit
   Sleep(800);
+end;
+
+// ---------------------------------------------------------------------------
+//  RemoveUserData — ask once at uninstall start, then clean up if confirmed
+// ---------------------------------------------------------------------------
+var
+  _RemoveUserData: Boolean;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  FindAndStopProcess('{#AppExeName}');
+  Sleep(800);
+  _RemoveUserData :=
+    MsgBox(
+      'Do you want to remove your Gravity Nexus settings and local data?' + #13#10#13#10 +
+      'This will permanently delete:' + #13#10 +
+      '  - Saved settings (registry)' + #13#10 +
+      '  - Saved login credentials (Windows Credential Manager)' + #13#10 +
+      '  - Local data (%LOCALAPPDATA%\GravityNexus\)' + #13#10#13#10 +
+      'Choose No to keep your settings for a future reinstall.',
+      mbConfirmation, MB_YESNO
+    ) = IDYES;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ResultCode: Integer;
+  GravityAppData: String;
+  PSCmd: String;
+begin
+  if (CurUninstallStep = usPostUninstall) and _RemoveUserData then
+  begin
+    // QSettings — HKCU\Software\GravityNexus\GravityNexus, then the now-empty parent
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\GravityNexus\GravityNexus');
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\GravityNexus');
+
+    // Windows Credential Manager entries created by Python keyring (service "gravity_nexus").
+    // keyring stores two compound-target entries: gravity_nexus/__last_user__ and
+    // gravity_nexus/<username>, so we enumerate all matching targets and delete each one.
+    PSCmd := 'cmdkey /list | Select-String ''gravity_nexus'' | ' +
+             'ForEach-Object { ' +
+               '$t = if ($_ -match ''target=(\S+)'') { $Matches[1] } ' +
+                    'elseif ($_ -match ''Target:\s+(\S+)'') { $Matches[1] }; ' +
+               'if ($t) { cmdkey /delete:$t } }';
+    Exec(ExpandConstant('{sys}') + '\WindowsPowerShell\v1.0\powershell.exe',
+         '-NonInteractive -ExecutionPolicy Bypass -Command "' + PSCmd + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // All local app data under %LOCALAPPDATA%\GravityNexus\ (logs and any future subdirs)
+    GravityAppData := ExpandConstant('{localappdata}') + '\GravityNexus';
+    DelTree(GravityAppData, True, True, True);
+  end;
 end;
 

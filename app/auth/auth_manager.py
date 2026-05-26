@@ -19,7 +19,7 @@ KEYRING_USER_KEY = "__last_user__"
 # ── Background threads ─────────────────────────────────────────────────────────
 
 class _TokenExchangeThread(QThread):
-    """POSTs auth code to /auth/token and emits the result."""
+    """POSTs auth code to /api/v1/auth/token and emits the result."""
 
     exchange_done = Signal(bool, dict, str)  # success, response_data, error_msg
 
@@ -34,7 +34,7 @@ class _TokenExchangeThread(QThread):
         try:
             with httpx.Client(timeout=httpx.Timeout(30, connect=10), trust_env=False) as client:
                 resp = client.post(
-                    f"{self._base_url}/auth/token",
+                    f"{self._base_url}/api/v1/auth/token",
                     json={"code": self._code, "state": self._state},
                 )
             resp.raise_for_status()
@@ -53,7 +53,7 @@ class _TokenExchangeThread(QThread):
 
 
 class _RefreshThread(QThread):
-    """POSTs a refresh token to /auth/refresh and emits the result."""
+    """POSTs a refresh token to /api/v1/auth/refresh and emits the result."""
 
     refresh_done = Signal(bool, dict, str)  # success, response_data, error_msg
 
@@ -72,7 +72,7 @@ class _RefreshThread(QThread):
         try:
             with httpx.Client(timeout=httpx.Timeout(30, connect=10), trust_env=False) as client:
                 resp = client.post(
-                    f"{self._base_url}/auth/refresh",
+                    f"{self._base_url}/api/v1/auth/refresh",
                     json={"refresh_token": self._refresh_token},
                 )
             resp.raise_for_status()
@@ -213,7 +213,7 @@ class AuthManager(QObject):
             try:
                 with httpx.Client(timeout=httpx.Timeout(5)) as client:
                     client.post(
-                        f"{self._bot_base_url.rstrip('/')}/auth/logout",
+                        f"{self._bot_base_url.rstrip('/')}/api/v1/auth/logout",
                         json={"refresh_token": token} if token else {},
                     )
             except Exception:
@@ -293,7 +293,7 @@ class AuthManager(QObject):
             with httpx.Client(timeout=httpx.Timeout(30, connect=10)) as client:
                 log.info("Refreshing access token for user %s", username)
                 resp = client.post(
-                    f"{self._bot_base_url.rstrip('/')}/auth/refresh",
+                    f"{self._bot_base_url.rstrip('/')}/api/v1/auth/refresh",
                     json={"refresh_token": token},
                 )
             resp.raise_for_status()

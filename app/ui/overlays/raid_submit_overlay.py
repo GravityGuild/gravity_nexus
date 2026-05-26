@@ -141,14 +141,16 @@ class RaidSubmitOverlay(BaseOverlayWindow):
 
     def _fetch_raids(self) -> None:
         import time as _time
+        from datetime import datetime, timedelta, timezone
         from core.registry import registry
         from services.protocols import IGravityBotService
 
+        date_from = (datetime.now(timezone.utc) - timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%S")
         self._fetch_raids_t0 = _time.perf_counter()
         log.debug("RAID_TIME fetch_raids requested at t=0")
         svc = registry.get(IGravityBotService)
         svc.raids_fetched.connect(self._on_raids_fetched)
-        svc.fetch_raids_cached()
+        svc.fetch_raids_cached(date_from=date_from, limit=5)
 
     def _on_raids_fetched(self, success: bool, body: str) -> None:
         import json as _json

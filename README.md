@@ -26,7 +26,7 @@ Raid tools and integration with Gravity's Discord bot and DKP website, for Proje
 
 ### Steps
 
-1. Download the latest installer from the [Releases](https://github.com/GravityGuild/gravity_nexus/releases) page.
+1. Download the latest `GravityNexus_Setup_x.x.x.exe` installer from the [Releases](https://github.com/GravityGuild/gravity_nexus/releases) page.
 2. Run `GravityNexus_Setup_x.x.x.exe` and follow the on-screen prompts.
 3. Launch **Gravity Nexus** from the Start Menu or Desktop shortcut.
 
@@ -46,7 +46,7 @@ Raid tools and integration with Gravity's Discord bot and DKP website, for Proje
 
 ## Features
 
-**Software updates** — Gravity Nexus can check for and install new releases automatically. Provide a GitHub Personal Access Token in Settings → General to enable this. The token is stored securely in your system credential store.
+**Software updates** — Gravity Nexus can check for and install new releases automatically. To update your version go to Settings → General → Software Updates.
 
 
 ### Raid Tools

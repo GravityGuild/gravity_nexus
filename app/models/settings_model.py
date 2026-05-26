@@ -11,22 +11,21 @@ from dataclasses import dataclass, field
 @dataclass
 class GeneralSettings:
     log_directory: str = ""       # Path to the EverQuest "Logs" folder
-    auto_start_parser: bool = False
+    auto_start_parser: bool = True
     minimize_to_tray: bool = True
-    start_with_windows: bool = False
+    start_with_windows: bool = True
     check_for_updates: bool = True
-    github_token: str = ""         # stored in credential store, not plain settings
     last_update_check_timestamp: float = 0.0
     update_check_interval_hours: int = 24
     debug_logging: bool = False
     hardware_accelerated: bool = True
-    reduce_update_rate_in_background: bool = True
+    reduce_update_rate_in_background: bool = False
 
 
 @dataclass
 class OverlaySettings:
     enabled: bool = True
-    opacity: float = 0.85
+    opacity: float = 1.0
     click_through: bool = False
     always_on_top: bool = True
     scale: float = 1.0
@@ -57,7 +56,7 @@ class NotificationSettings:
 @dataclass
 class AppearanceSettings:
     theme_name: str = "cosmic"
-    font_size: int = 14          # pt — matches _DEFAULT_FONT_PT in theme_manager
+    font_size: int = 16          # pt — matches _DEFAULT_FONT_PT in theme_manager
     use_orbitron_headings: bool = True
 
 
@@ -67,7 +66,7 @@ class GravityBotSettings:
 
     auth_token: str = ""    # plain bearer token (no "Bearer " prefix)
     ws_enabled: bool = True  # enable WebSocket connection thread
-    auto_connect: bool = False  # connect automatically on app start
+    auto_connect: bool = True  # connect automatically on app start
     send_guild_chat: bool = True  # forward parsed guild chat to bot via WebSocket
 
 

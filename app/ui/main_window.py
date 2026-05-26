@@ -243,22 +243,25 @@ class MainWindow(QWidget):
         if self._auth and self._auth._username:
             self._sidebar.set_user(self._auth._username)
         self._bot_svc.connect_bot()
+        self.bring_to_foreground()
 
     @Slot()
     def _on_logged_out(self) -> None:
         self._sidebar.clear_user()
         self._bot_svc.disconnect_bot()
+        self.hide()
         from PySide6.QtWidgets import QDialog as _QDialog  # noqa: PLC0415
         from ui.login_dialog import LoginDialog             # noqa: PLC0415
-        dialog = LoginDialog(self._auth, self)
+        dialog = LoginDialog(self._auth)
         if dialog.exec() != _QDialog.DialogCode.Accepted:
             QApplication.quit()
 
     @Slot()
     def _on_session_expired(self) -> None:
+        self.hide()
         from PySide6.QtWidgets import QDialog as _QDialog  # noqa: PLC0415
         from ui.login_dialog import LoginDialog             # noqa: PLC0415
-        dialog = LoginDialog(self._auth, self)
+        dialog = LoginDialog(self._auth)
         if dialog.exec() != _QDialog.DialogCode.Accepted:
             QApplication.quit()
 
@@ -308,8 +311,11 @@ class MainWindow(QWidget):
         full_who_log: str = arg_vals[1]
         """Show (or replace) the raid submit overlay."""
         # Pre-fetch raids now so the overlay dropdown is ready (or nearly so) by
-        # the time the user sees it.
-        self._bot_svc.fetch_raids()
+        # the time the user sees it. Use the same params as the overlay so the
+        # cache hit is valid when the overlay calls fetch_raids_cached().
+        from datetime import datetime, timedelta, timezone
+        _date_from = (datetime.now(timezone.utc) - timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%S")
+        self._bot_svc.fetch_raids(date_from=_date_from, limit=5)
         if self._raid_overlay is not None:
             try:
                 self._raid_overlay.close()
@@ -569,6 +575,35 @@ class MainWindow(QWidget):
         QApplication.quit()
 
     # ── Window state / native resize+snap ─────────────────────────────────────
+
+    def bring_to_foreground(self) -> None:
+        """Show, un-minimize, and forcefully activate the window.
+
+        On Windows, SetForegroundWindow is gated by focus-stealing prevention
+        and silently fails when another process owns the foreground (e.g. the
+        browser after OAuth).  AttachThreadInput grants our thread the same
+        activation rights as the current foreground thread, making the call
+        reliable regardless of which app the user was in.
+        """
+        self.show()
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        if sys.platform == "win32":
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = int(self.winId())
+            fg_hwnd = user32.GetForegroundWindow()
+            fg_tid = user32.GetWindowThreadProcessId(fg_hwnd, None)
+            my_tid = ctypes.windll.kernel32.GetCurrentThreadId()
+            if fg_tid and fg_tid != my_tid:
+                user32.AttachThreadInput(fg_tid, my_tid, True)
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+                user32.AttachThreadInput(fg_tid, my_tid, False)
+            else:
+                user32.SetForegroundWindow(hwnd)
 
     def showEvent(self, event) -> None:  # noqa: ANN001
         super().showEvent(event)

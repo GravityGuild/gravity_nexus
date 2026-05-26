@@ -116,7 +116,7 @@ class SetupWizard(QDialog):
 
         body = ThemedLabel(
             "Let's get you set up in just a few steps.\n\n"
-            "We'll ask for your EverQuest log folder and a couple of "
+            "We'll ask for your EverQuest Project 1999 log folder and a couple of "
             "startup preferences. You can change any of these later in Settings.",
             color_role=ColorRole.TEXT_SECONDARY,
             word_wrap=True,

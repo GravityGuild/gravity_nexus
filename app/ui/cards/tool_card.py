@@ -22,7 +22,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from theme.colors import ACCENT_CYAN_RGB
+from ui.widgets.icon_label import AppIcon, IconLabel
 from ui.widgets.toggle_switch import ToggleSwitch
+
 
 _QWIDGETSIZE_MAX = 16_777_215
 
@@ -55,6 +58,8 @@ class ToolCard(QFrame):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        self._chevron_label = IconLabel(AppIcon.CHEVRON_DOWN, color=ACCENT_CYAN_RGB, size=40)
+
         self.setObjectName("ToolCard")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
@@ -80,16 +85,16 @@ class ToolCard(QFrame):
     def _build_header(self, title: str, description: str, enabled: bool) -> None:
         self._header = QWidget()
         self._header.setObjectName("ToolCardHeader")
+        self._header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         hl = QHBoxLayout(self._header)
         hl.setContentsMargins(14, 10, 14, 10)
         hl.setSpacing(10)
 
-        self._chevron = QLabel("▼")
-        self._chevron.setObjectName("ToolCardChevron")
-        self._chevron.setFixedWidth(14)
-        self._chevron.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        hl.addWidget(self._chevron, alignment=Qt.AlignmentFlag.AlignTop)
+        # Add chevron
+        self._chevron_label.setObjectName("ToolCardChevron")
+        self._chevron_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        hl.addWidget(self._chevron_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
@@ -142,7 +147,7 @@ class ToolCard(QFrame):
         bl.addWidget(self._tab_widget)
 
     def _build_animation(self) -> None:
-        self._anim = QPropertyAnimation(self._body_container, b"maximumHeight", self)
+        self._anim = QPropertyAnimation(self, b"maximumHeight", self)
         self._anim.setDuration(220)
         self._anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
         self._anim.finished.connect(self._on_anim_finished)
@@ -186,27 +191,28 @@ class ToolCard(QFrame):
         if self._expanded == expanded:
             return
         self._expanded = expanded
-        self._chevron.setText("▼" if expanded else "▶")
+        self._chevron_label.set_icon(AppIcon.CHEVRON_DOWN if expanded else AppIcon.CHEVRON_RIGHT)
         self._anim.stop()
 
         if expanded:
-            self._body_container.show()
-            self._body_container.setMaximumHeight(_QWIDGETSIZE_MAX)
-            target = self._body_container.sizeHint().height()
             if animated:
-                self._anim.setStartValue(0)
-                self._anim.setEndValue(max(target, 1))
+                collapsed_h = self.height()
+                self.setMaximumHeight(collapsed_h)
+                self._body_container.show()
+                body_h = self._body_container.sizeHint().height()
+                self._anim.setStartValue(collapsed_h)
+                self._anim.setEndValue(collapsed_h + max(body_h, 1))
                 self._anim.start()
             else:
-                self._body_container.setMaximumHeight(_QWIDGETSIZE_MAX)
+                self._body_container.show()
+                self.setMaximumHeight(_QWIDGETSIZE_MAX)
         else:
-            current = self._body_container.height()
             if animated:
-                self._anim.setStartValue(current)
-                self._anim.setEndValue(0)
+                collapsed_h = self.height() - self._body_container.height()
+                self._anim.setStartValue(self.height())
+                self._anim.setEndValue(collapsed_h)
                 self._anim.start()
             else:
-                self._body_container.setMaximumHeight(0)
                 self._body_container.hide()
 
     def is_tool_enabled(self) -> bool:
@@ -230,12 +236,10 @@ class ToolCard(QFrame):
         return super().eventFilter(obj, event)
 
     # ── Private helpers ────────────────────────────────────────────────────────
-
     def _toggle_expand(self) -> None:
         self.set_expanded(not self._expanded)
 
     def _on_anim_finished(self) -> None:
         if not self._expanded:
             self._body_container.hide()
-        else:
-            self._body_container.setMaximumHeight(_QWIDGETSIZE_MAX)
+        self.setMaximumHeight(_QWIDGETSIZE_MAX)

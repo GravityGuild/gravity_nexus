@@ -64,8 +64,10 @@ class AppIcon(str, Enum):
     CHART_TIMELINE_VARIANT = "chart-timeline-variant.svg"
     CHECK = "check.svg"
     CHECK_BOLD = "check-bold.svg"
+    CHEVRON_DOWN = "chevron-down.svg"
     CHEVRON_DOWN_BOX_OUTLINE = "chevron-down-box-outline.svg"
     CHEVRON_LEFT_BOX_OUTLINE = "chevron-left-box-outline.svg"
+    CHEVRON_RIGHT = "chevron-right.svg"
     CHEVRON_RIGHT_BOX_OUTLINE = "chevron-right-box-outline.svg"
     CHEVRON_UP_BOX_OUTLINE = "chevron-up-box-outline.svg"
     CLOSE = "close.svg"
@@ -143,28 +145,43 @@ def icon_pixmap(
     >>> px = icon_pixmap("robot.svg", color="#FF6B6B")
     """
     filename = icon.value if isinstance(icon, AppIcon) else icon
-    src = QPixmap(str(get_asset(f"icons/{filename}")))
+    path = str(get_asset(f"icons/{filename}"))
 
-    if src.isNull():
-        blank = QPixmap(size, size)
-        blank.fill(Qt.GlobalColor.transparent)
-        return blank
-
-    scaled = src.scaled(
-        size,
-        size,
-        Qt.AspectRatioMode.KeepAspectRatio,
-        Qt.TransformationMode.SmoothTransformation,
-    )
-
-    result = QPixmap(scaled.size())
-    result.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(result)
-    painter.drawPixmap(0, 0, scaled)
-    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-    painter.fillRect(result.rect(), _to_qcolor(color))
-    painter.end()
-    return result
+    if filename.lower().endswith(".svg"):
+        from PySide6.QtSvg import QSvgRenderer
+        renderer = QSvgRenderer(path)
+        if not renderer.isValid():
+            blank = QPixmap(size, size)
+            blank.fill(Qt.GlobalColor.transparent)
+            return blank
+        result = QPixmap(size, size)
+        result.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(result)
+        renderer.render(painter)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(result.rect(), _to_qcolor(color))
+        painter.end()
+        return result
+    else:
+        raw = QPixmap(path)
+        if raw.isNull():
+            blank = QPixmap(size, size)
+            blank.fill(Qt.GlobalColor.transparent)
+            return blank
+        src = raw.scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        result = QPixmap(src.size())
+        result.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(result)
+        painter.drawPixmap(0, 0, src)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(result.rect(), _to_qcolor(color))
+        painter.end()
+        return result
 
 
 def inline_icon_html(
