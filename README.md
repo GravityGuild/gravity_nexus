@@ -23,6 +23,7 @@ Raid tools and integration with Gravity's Discord bot and DKP website, for Proje
 ### Requirements
 
 - Windows 10 or later
+- Given the `Gravity Nexus Users` role on the dkp website. (Ask admin for access)
 
 ### Steps
 
