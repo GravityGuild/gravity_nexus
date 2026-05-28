@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 # Font files to register with Qt — resolved relative to this file so the path
 # works in both dev and Nuitka builds.
-_THEME_DIR       = Path(__file__).resolve().parent
+_THEME_DIR = Path(__file__).resolve().parent
 _ASSETS_FONTS_DIR = _THEME_DIR.parent / "assets" / "fonts"
 
 _FONT_FILES: list[str] = [

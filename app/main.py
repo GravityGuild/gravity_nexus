@@ -80,6 +80,7 @@ from utils.resource_utils import get_asset
 # ── Composition root — only place that imports concrete service classes ────────
 from core.registry import registry
 from services.protocols import IAuthService, IGravityBotService, ILogParserService, ISettingsService, IUpdateService
+from services.eq_process_watcher import EqProcessWatcher
 from services.gravity_bot_service import GravityBotService
 from services.log_parser_service import LogParserService
 from services.settings_service import SettingsService
@@ -310,8 +311,38 @@ def main() -> int:
     gravity_bot_svc = GravityBotService(auth, api)
     registry.register(IGravityBotService, gravity_bot_svc)
 
-    # Forward guild-chat messages to the bot WebSocket when connected
+    # Forward guild-chat and /who results to the bot WebSocket when connected
     log_parser_svc.guild_message.connect(gravity_bot_svc.send_guild_chat)
+    log_parser_svc.who_list_detected.connect(gravity_bot_svc.send_who_result)
+    log_parser_svc.active_file_changed.connect(gravity_bot_svc.set_character)
+    log_parser_svc.character_offline.connect(lambda: gravity_bot_svc.set_character(gravity_bot_svc.NO_CHARACTER))
+    log_parser_svc.character_at_select.connect(
+        lambda: gravity_bot_svc.update_character_state(gravity_bot_svc.STATE_CHARACTER_SELECT)
+    )
+    log_parser_svc.character_entered_game.connect(
+        lambda: gravity_bot_svc.set_character(
+            log_parser_svc.active_character,
+            gravity_bot_svc.STATE_IN_GAME,
+        )
+    )
+    log_parser_svc.line_parsed.connect(gravity_bot_svc.notify_log_activity)
+
+    # Suppress WS character_set sends during dbg.txt replay; flush final state once complete.
+    # end_scan is connected after the watcher so game_crashed (if fired) updates _current_character
+    # before end_scan flushes it.
+    log_parser_svc.startup_scan_started.connect(gravity_bot_svc.begin_scan)
+
+    # Crash detection — arm on EQ startup, clear character if eqgame.exe exits uncleanly
+    eq_process_watcher = EqProcessWatcher()
+    log_parser_svc.game_started.connect(eq_process_watcher.on_game_started)
+    log_parser_svc.startup_scan_complete.connect(eq_process_watcher.on_startup_scan_complete)
+    log_parser_svc.character_offline.connect(eq_process_watcher.on_clean_exit)
+    # end_scan registered after watcher so watcher's game_crashed runs first
+    log_parser_svc.startup_scan_complete.connect(gravity_bot_svc.end_scan)
+    eq_process_watcher.game_crashed.connect(
+        lambda: gravity_bot_svc.set_character(gravity_bot_svc.NO_CHARACTER)
+    )
+    app.aboutToQuit.connect(eq_process_watcher.stop)
 
     # Start the WS connection and block (pumping the event loop) until the
     # handshake resolves — so the main window opens with connection status ready.
@@ -379,6 +410,9 @@ def main() -> int:
     )
     update_svc.restart_requested.connect(window.force_quit)
     update_svc.start()
+
+    # Stale-state clear (crash / no EQ running at startup) → update status bar
+    eq_process_watcher.game_crashed.connect(window.on_game_crashed)
 
     # ── Auto-start services based on settings (after window is wired up) ──────
     general = settings_svc.settings.general

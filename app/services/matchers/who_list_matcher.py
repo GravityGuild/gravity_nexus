@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 # ── Compiled patterns ─────────────────────────────────────────────────────────
 
 # Start-of-log marker (body after EQ timestamp is stripped)
-_WHO_START_RE: re.Pattern = re.compile(r"^Players on EverQuest:\s*$")
+_WHO_START_RE: re.Pattern = re.compile(r"^Players (?:on|in) EverQuest:\s*$")
 
 # Separator line e.g. "---------------------------"
 _WHO_SEP_RE: re.Pattern = re.compile(r"^-+\s*$")
@@ -54,6 +54,8 @@ _PLAYER_RE: re.Pattern = re.compile(
     r"(?P<name>[A-Za-z]+)"
     r"(?:\s+\((?P<race>[^)]+)\))?"
     r"(?:\s+<(?P<guild>[^>]+)>)?"
+    r"(?:\s+ZONE:\s*(?P<zone>\S+))?"
+    r"(?:\s+LFG)?"
     r"\s*$",
 )
 
@@ -91,6 +93,7 @@ def parse_who_line(raw: str) -> Optional[WhoEntry]:
         guild=m.group("guild"),
         is_afk=m.group("afk") is not None,
         raw_line=raw,
+        zone=m.group("zone"),
     )
 
 
@@ -120,7 +123,7 @@ class WhoListMatcher(LogMatcher):
     MATCHER_KEY = "who_list"
     ENABLED_BY_DEFAULT = True
 
-    who_list_detected = Signal(list)  # list[WhoEntry]
+    who_list_detected = Signal(list, int)  # list[WhoEntry] (filtered), int (total parsed)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -169,9 +172,10 @@ class WhoListMatcher(LogMatcher):
             else:
                 skipped += 1
 
+        total = len(entries) + skipped
         log.info(
             "Who-list complete: %d total parsed, %d to submit, %d excluded",
-            len(entries) + skipped,
+            total,
             len(entries),
             skipped,
         )
@@ -179,7 +183,7 @@ class WhoListMatcher(LogMatcher):
         self._raw_lines.clear()
 
         if entries:
-            self.who_list_detected.emit(entries)
+            self.who_list_detected.emit(entries, total)
         else:
             log.debug("Who-list: no submittable entries — signal suppressed")
 

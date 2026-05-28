@@ -43,23 +43,28 @@ PRESETS: dict[str, list[str]] = {
         "nexusraidlog is not online at this time.",
         "Players on EverQuest:",
         "---------------------------",
-        "[1 Cleric] Chealin (Dwarf) <South Qeynos Bait and Tackle>",
-        "[18 Shaman] Liyankaro (Barbarian)",
-        "[60 Warlord] Krayziefoo (Barbarian) <The Second Sons>",
-        "AFK [ANONYMOUS] Horza",
-        "[50 Necromancer] Shoza (Gnome)",
-        "[60 Virtuoso] Media (Half Elf) <The Second Sons>",
-        "[ANONYMOUS] Antheri",
-        "[5 Bard] Hoarsemule (Human) <Riot>",
-        "[ANONYMOUS] Sugarfoot  <Fuse>",
-        "[60 Warlord] Satoshibtc (Barbarian) <Gravity>",
-        "[2 Bard] Zerotone (Half Elf)",
-        "AFK [1 Warrior] Potiondealer (Human) <Dungeon Homies>",
-        "[ANONYMOUS] Ozium  <Dawn Believers>",
-        "[6 Bard] Traderpop (Half Elf)",
-        "[10 Cleric] Lillymoon (Gnome) <The Second Sons>",
-        "[5 Bard] Rurg (Human) <Gravity>",
-        "There are 16 players in East Commonlands.",
+        "[60 Grandmaster] Pandemick (Iksar) <Gravity>  LFG",
+        "[60 Assassin] Flipsides (Gnome) <Gravity>",
+        "[60 Assassin] Daelthar (Dwarf) <Gravity>",
+        "[60 Warlord] Nodtveidt (Dark Elf) <Gravity>",
+        "[60 Grandmaster] Diikembe (Iksar) <Gravity>",
+        "[60 Assassin] Roging (Dwarf) <Gravity>",
+        "[60 High Priest] Healii (Dwarf) <Gravity>",
+        "[60 Assassin] Spineshank (Halfling) <Gravity>",
+        "[60 High Priest] Agsafety (Halfling) <Gravity>",
+        "[60 High Priest] Eusebio (Halfling) <Gravity>",
+        "[60 Grandmaster] Lanneth (Human) <Gravity>",
+        "[60 High Priest] Belshazar (Human) <Gravity>",
+        "[60 Warlord] Allishya (Dark Elf) <Gravity>",
+        "[60 High Priest] Sinaelr (Dark Elf) <Gravity>",
+        "[60 Warlord] Dubbstep (Gnome) <Gravity>",
+        "[60 Phantasmist] Amfar (Iksar) <Gravity>",
+        "[60 Grandmaster] Daewen (Human) <Gravity>",
+        "[54 Vicar] Awaloo (Gnome) <Gravity>",
+        "[60 High Priest] Bellossom (Gnome) <Gravity>",
+        "[59 Templar] Naughity (Dark Elf) <Gravity>",
+        "[60 High Priest] Heelur (Dark Elf) <Gravity>",
+        "There are 21 players in The Plane of Hate.",
     ],
     "Who Logs": [
         "Players on EverQuest:",
@@ -81,6 +86,24 @@ PRESETS: dict[str, list[str]] = {
         "[10 Cleric] Lillymoon (Gnome) <The Second Sons>",
         "[5 Bard] Rurg (Human) <Gravity>",
         "There are 16 players in East Commonlands.",
+    ],
+    "/who heelur": [
+        "Players on EverQuest:",
+        "---------------------------",
+        "[60 High Priest] Heelur (Dark Elf) <Gravity>",
+        "There is 1 player in Temple of Veeshan.",
+    ],
+    "/who lyle": [
+        "Players on EverQuest:",
+        "---------------------------",
+        "[60 Phantasmist] Lyle (Dark Elf) <Gravity>",
+        "There is 1 player in Temple of Veeshan.",
+    ],
+    "/who timmin": [
+        "Players on EverQuest:",
+        "---------------------------",
+        "[ANONYMOUS] Timmin  <Gravity>",
+        "There is 1 player in West Commonlands.",
     ],
     "Zone In — Plane of Time": [
         "You have entered Plane of Time.",
@@ -153,13 +176,14 @@ class FakeLogService(QObject):
     session_started = Signal()
     session_stopped = Signal()
 
-    _CHAR_NAME = "TestDummy"
+    _DEFAULT_CHAR_NAME = "TestDummy"
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._temp_dir: Optional[Path] = None
         self._log_path: Optional[Path] = None
         self._fh = None  # open file handle for appending
+        self._char_name = self._DEFAULT_CHAR_NAME
 
         self._parser_svc = None  # set by start()
 
@@ -184,24 +208,29 @@ class FakeLogService(QObject):
 
     @property
     def character_name(self) -> str:
-        return self._CHAR_NAME
+        return self._char_name
 
     # ── Session control ────────────────────────────────────────────────────────
 
-    def start(self, parser_svc) -> None:  # noqa: ANN001
+    def start(self, parser_svc, character_name: str = "") -> None:  # noqa: ANN001
         """Create the temp log file and redirect *parser_svc* to tail it.
+
+        *character_name* controls the log filename (and therefore the character
+        name the parser reports via ``active_file_changed``).  Defaults to
+        ``"TestDummy"`` when empty or not provided.
 
         If a session is already active it is stopped first.
         """
         if self.is_active:
             self.stop()
 
+        self._char_name = (character_name.strip() or self._DEFAULT_CHAR_NAME)
         self._parser_svc = parser_svc
 
         # Create temp directory + empty log file
         tmp = tempfile.mkdtemp(prefix="gravity_nexus_fakelog_")
         self._temp_dir = Path(tmp)
-        self._log_path = self._temp_dir / f"eqlog_{self._CHAR_NAME}_project1999.txt"
+        self._log_path = self._temp_dir / f"eqlog_{self._char_name}_project1999.txt"
         self._log_path.touch()
 
         # Open an append handle (kept open so writes are cheap)

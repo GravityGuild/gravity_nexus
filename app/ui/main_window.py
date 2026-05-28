@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import QPoint, Qt, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -33,6 +33,7 @@ from services.fake_log_service import FakeLogService
 from services.protocols import IGravityBotService, ILogParserService, ISettingsService, IUpdateService
 from services.mock_data_provider import MockDataProvider
 from ui.overlays.raid_submit_overlay import RaidSubmitOverlay
+from ui.overlays.who_lookup_overlay import WhoLookupOverlay
 from ui.overlays.positioning_overlay import PositioningOverlay
 from ui.overlays.quick_toolbar_overlay import QuickToolbarOverlay
 from utils.resource_utils import get_asset
@@ -40,7 +41,7 @@ from ui.pages import (
     AboutPage,
     AdvancedPage,
     AppearancePage,
-    FakeLogPage,
+    DevToolsPage,
     FeatureFlagsPage,
     GeneralPage,
     GravityBotPage,
@@ -74,10 +75,11 @@ class MainWindow(QWidget):
         self._bot_svc = registry.get(IGravityBotService)
         self._fake_log_svc = FakeLogService(self)
         self._raid_overlay: Optional[RaidSubmitOverlay] = None
+        self._who_overlay: Optional[WhoLookupOverlay] = None
         self._toolbar_overlay: Optional[QuickToolbarOverlay] = None
         self._active_character: str = ""
         self._positioning_overlays: list[PositioningOverlay] = []
-        self._position_snapshot: dict[str, tuple[int, int]] = {}  # pre-drag snapshot
+        self._position_snapshot: dict[str, tuple[int, int, int, int]] = {}  # pre-drag snapshot
         self._quitting: bool = False  # True when a real quit is in progress
 
         # Frameless + transparent background for drop shadow
@@ -179,7 +181,7 @@ class MainWindow(QWidget):
                        dev_only=True),
             PageConfig("Dev Tools",
                        AppIcon.TEST_TUBE,
-                       lambda: FakeLogPage(self._fake_log_svc),
+                       lambda: DevToolsPage(self._fake_log_svc),
                        dev_only=True),
             PageConfig("Feature Flags",
                        AppIcon.CODE_BRACES,
@@ -210,6 +212,10 @@ class MainWindow(QWidget):
         self._parser_svc.status_changed.connect(self._on_parser_status_changed)
         self._parser_svc.active_file_changed.connect(self._on_active_file_changed)
         self._parser_svc.raid_log_detected.connect(self._on_raid_log_detected)
+        self._parser_svc.who_list_detected.connect(self._on_who_list_detected)
+        self._parser_svc.character_entered_game.connect(self._on_character_entered_game)
+        self._parser_svc.character_at_select.connect(self._on_character_at_select)
+        self._parser_svc.character_offline.connect(self._on_character_offline)
 
         # Gravity Bot
         self._bot_svc.connected_changed.connect(self._status_bar.set_grav_bot_connected)
@@ -293,7 +299,8 @@ class MainWindow(QWidget):
     def _on_active_file_changed(self, character: str) -> None:
         """Called when the parser locks onto a (new) log file."""
         self._active_character = character
-        self._status_bar.set_parser_running(True, character)
+        self._status_bar.set_parser_running(True, self._parser_svc.active_log_filename)
+        self._status_bar.set_character(character)
         self._advanced_page.set_parser_status(True, character)
         self._general_page.update_parser_status(True, character)
 
@@ -301,10 +308,32 @@ class MainWindow(QWidget):
         if status == "running":
             return  # active_file_changed handles the "running" UI update
         self._active_character = ""
-        running = False
-        self._status_bar.set_parser_running(running)
-        self._advanced_page.set_parser_status(running)
-        self._general_page.update_parser_status(running)
+        self._status_bar.set_parser_running(False)
+        self._status_bar.set_character("")
+        self._status_bar.set_character_state("offline")
+        self._advanced_page.set_parser_status(False)
+        self._general_page.update_parser_status(False)
+
+    @Slot()
+    def _on_character_entered_game(self) -> None:
+        self._status_bar.set_character(self._parser_svc.active_character)
+        self._status_bar.set_character_state("in_game")
+
+    @Slot()
+    def _on_character_at_select(self) -> None:
+        self._status_bar.set_character(self._parser_svc.active_character)
+        self._status_bar.set_character_state("at_select")
+
+    @Slot()
+    def _on_character_offline(self) -> None:
+        self._status_bar.set_character("")
+        self._status_bar.set_character_state("offline")
+
+    @Slot()
+    def on_game_crashed(self) -> None:
+        """EQ exited without a clean disconnect — clear character name and state."""
+        self._status_bar.set_character("")
+        self._status_bar.set_character_state("offline")
 
     def _on_raid_log_detected(self, arg_vals: list) -> None:
         raw_lines = arg_vals[0]
@@ -324,7 +353,6 @@ class MainWindow(QWidget):
 
         self._raid_overlay = RaidSubmitOverlay(raw_names=raw_lines, full_who_log=full_who_log)
         self._raid_overlay.dismissed.connect(self._on_raid_overlay_dismissed)
-        self._raid_overlay.position_changed.connect(self._on_raid_overlay_moved)
 
         # Apply saved opacity and scale
         self._raid_overlay.set_overlay_opacity(self._svc.settings.overlay.opacity)
@@ -336,9 +364,7 @@ class MainWindow(QWidget):
             x, y, w, h = saved
             if w > 0 and h > 0:
                 self._raid_overlay.resize(w, h)
-            avail = QApplication.primaryScreen().availableGeometry()
-            x = max(avail.left(), min(x, avail.right() - max(w, 50)))
-            y = max(avail.top(), min(y, avail.bottom() - max(h, 50)))
+            x, y = self._clamp_to_screen(x, y, w, h)
             self._raid_overlay.move(x, y)
         else:
             screen = QApplication.primaryScreen().geometry()
@@ -348,6 +374,7 @@ class MainWindow(QWidget):
             )
 
         self._raid_overlay.show()
+        self._raid_overlay.position_changed.connect(self._on_raid_overlay_moved)
 
     def _on_raid_overlay_dismissed(self) -> None:
         if self._raid_overlay is not None:
@@ -366,12 +393,74 @@ class MainWindow(QWidget):
             except RuntimeError:
                 pass
 
+    def _on_who_list_detected(self, entries: list, total: int) -> None:
+        """Show the who lookup overlay when exactly one character appeared in the /who result."""
+        if total != 1 or len(entries) != 1:
+            return
+        entry = entries[0]
+        settings = self._svc.settings
+        if not settings.who_lookup.enabled:
+            return
+        if (self._active_character
+                and entry.name.lower() == self._active_character.lower()
+                and not settings.who_lookup.show_own_character):
+            return
+        if self._who_overlay is not None:
+            try:
+                self._who_overlay.close()
+            except RuntimeError:
+                pass
+
+        self._who_overlay = WhoLookupOverlay(entry.name)
+        self._who_overlay.dismissed.connect(self._on_who_overlay_dismissed)
+
+        self._who_overlay.set_overlay_opacity(settings.overlay.opacity)
+        self._who_overlay.set_overlay_scale(settings.overlay.scale)
+
+        saved = settings.overlay.positions.get("who_lookup")
+        if saved:
+            x, y, w, h = saved
+            if w > 0 and h > 0:
+                self._who_overlay.resize(w, h)
+            x, y = self._clamp_to_screen(x, y, w, h)
+            self._who_overlay.move(x, y)
+        else:
+            screen = QApplication.primaryScreen().geometry()
+            self._who_overlay.move(
+                screen.center().x() - 200,
+                screen.center().y() - 130,
+            )
+
+        self._who_overlay.show()
+
+    def _on_who_overlay_dismissed(self) -> None:
+        if self._who_overlay is not None:
+            p = self._who_overlay.pos()
+            s = self._who_overlay.size()
+            self._svc.settings.overlay.positions["who_lookup"] = (p.x(), p.y(), s.width(), s.height())
+            self._svc.save()
+
+    def _on_who_overlay_moved(self) -> None:
+        if self._who_overlay is not None:
+            try:
+                p = self._who_overlay.pos()
+                s = self._who_overlay.size()
+                self._svc.settings.overlay.positions["who_lookup"] = (p.x(), p.y(), s.width(), s.height())
+                self._svc.save()
+            except RuntimeError:
+                pass
+
     @Slot(float)
     def _on_overlay_opacity_changed(self, opacity: float) -> None:
         """Apply the new opacity to all currently visible overlay windows."""
         if self._raid_overlay is not None:
             try:
                 self._raid_overlay.set_overlay_opacity(opacity)
+            except RuntimeError:
+                pass
+        if self._who_overlay is not None:
+            try:
+                self._who_overlay.set_overlay_opacity(opacity)
             except RuntimeError:
                 pass
         if self._toolbar_overlay is not None:
@@ -387,9 +476,25 @@ class MainWindow(QWidget):
 
     # ── Overlay positioning ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _clamp_to_screen(x: int, y: int, w: int, h: int) -> tuple[int, int]:
+        """Return (x, y) clamped so a w×h overlay stays on a visible screen.
+
+        Resolves the screen from the overlay's centre point so overlays on
+        secondary monitors are kept there rather than snapped to the primary.
+        """
+        screen = QApplication.screenAt(QPoint(x + w // 2, y + h // 2))
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry()
+        x = max(avail.left(), min(x, avail.right() - max(w, 50)))
+        y = max(avail.top(), min(y, avail.bottom() - max(h, 50)))
+        return x, y
+
     #: Maps overlay key → (display_label, default_size)
     _OVERLAY_REGISTRY: dict[str, tuple[str, tuple[int, int]]] = {
         "raid_submit": ("Raid Submit", (500, 360)),
+        "who_lookup":  ("Who Lookup",  (400, 260)),
         "toolbar":     ("Quick Toolbar", (150, 80)),
     }
 
@@ -478,7 +583,7 @@ class MainWindow(QWidget):
         try:
             saved = self._svc.settings.overlay.positions.get("toolbar")
             if saved:
-                x, y, _w, _h = saved
+                x, y = saved[0], saved[1]
                 self._toolbar_overlay.move(x, y)
             self._toolbar_overlay.show()
         except RuntimeError:
@@ -501,8 +606,7 @@ class MainWindow(QWidget):
         # Restore saved position
         saved = self._svc.settings.overlay.positions.get("toolbar")
         if saved:
-            x, y, w, h = saved
-            self._toolbar_overlay.move(x, y)
+            self._toolbar_overlay.move(saved[0], saved[1])
         else:
             screen = QApplication.primaryScreen().geometry()
             self._toolbar_overlay.move(

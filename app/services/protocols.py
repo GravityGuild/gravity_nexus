@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from models.log_event import LogSource as LogSource  # re-export for consumers
 from models.settings_model import AppSettings
 from services.matchers.base import LogMatcher
 
@@ -30,11 +31,19 @@ class ILogParserService(Protocol):
     """Tails an EQ log file and dispatches typed events to registered matchers."""
 
     # Qt Signals — typed as Any; connect after resolving from registry
-    line_parsed: Any         # Signal(LogEvent)
-    raid_log_detected: Any  # Signal(list[str])
-    active_file_changed: Any # Signal(str) — character name
-    zone_changed: Any        # Signal(str) — zone name
-    status_changed: Any      # Signal(str)
+    line_parsed: Any            # Signal(LogEvent)
+    raid_log_detected: Any      # Signal(list[str])
+    who_list_detected: Any      # Signal(list[WhoEntry], int) — filtered entries, total parsed
+    active_file_changed: Any    # Signal(str) — character name
+    game_started: Any           # Signal() — EQ process launched (dbg.txt startup line)
+    startup_scan_started: Any   # Signal() — dbg.txt historical scan about to begin
+    startup_scan_complete: Any  # Signal() — dbg.txt historical scan finished
+    character_offline: Any      # Signal() — character camped or inactivity timeout
+    character_at_select: Any    # Signal() — character arrived at character select screen
+    character_entered_game: Any # Signal() — character entered a game zone
+    zone_changed: Any           # Signal(str) — zone name (EQ log)
+    zone_connected: Any         # Signal(str, str) — (character, zone) from dgb.txt
+    status_changed: Any         # Signal(str)
 
     @property
     def status(self) -> str: ...
@@ -47,6 +56,9 @@ class ILogParserService(Protocol):
 
     @property
     def active_character(self) -> str: ...
+
+    @property
+    def active_log_filename(self) -> str: ...
 
     @property
     def current_zone(self) -> str: ...
@@ -101,6 +113,7 @@ class IGravityBotService(Protocol):
     notification_received: Any  # Signal(BotNotification)
     submit_result: Any          # Signal(bool, str)
     raids_fetched: Any          # Signal(bool, str) — success, json_body
+    character_fetched: Any      # Signal(bool, str) — success, json_body
 
     @property
     def is_connected(self) -> bool: ...
@@ -113,9 +126,17 @@ class IGravityBotService(Protocol):
 
     def fetch_raids_cached(self, max_age_secs: float = 30.0, date_from: str | None = None, limit: int | None = None) -> None: ...
 
+    def fetch_character(self, name: str) -> None: ...
+
     def submit_raid_log(self, channel_id: int, full_who_log: str) -> None: ...
 
     def send_guild_chat(self, character: str, message: str) -> None: ...
+
+    def send_who_result(self, entries: list) -> None: ...
+
+    def set_character(self, character: str, state: str = ...) -> None: ...
+
+    def update_character_state(self, state: str) -> None: ...
 
     def shutdown(self) -> None: ...
 

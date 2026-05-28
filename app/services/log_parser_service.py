@@ -57,6 +57,7 @@ Usage
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -64,8 +65,15 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
-from models.log_event import LogEvent, LogEventKind
+from models.log_event import LogEvent, LogEventKind, LogSource
 from services.matchers.base import LogMatcher
+from services.matchers.camp_matcher import CampMatcher
+from services.matchers.dbg.camp_dbg_matcher import CampDbgMatcher
+from services.matchers.dbg.char_select_dbg_matcher import CharSelectDbgMatcher
+from services.matchers.dbg.disconnect_dbg_matcher import DisconnectDbgMatcher
+from services.matchers.dbg.enter_game_dbg_matcher import EnterGameDbgMatcher
+from services.matchers.dbg.startup_dbg_matcher import StartupDbgMatcher
+from services.matchers.dbg.zone_dbg_matcher import ZoneDbgMatcher
 from services.matchers.guild_chat_matcher import GuildChatMatcher
 from services.matchers.raid_log_matcher import RaidLogMatcher
 from services.matchers.who_list_matcher import WhoListMatcher
@@ -73,11 +81,20 @@ from services.matchers.zone_matcher import ZoneMatcher
 
 log = logging.getLogger(__name__)
 
+# How many bytes from the end of dbg.txt to scan synchronously at startup.
+# Covers weeks of state transitions for a typical player.
+_DBG_SCAN_BYTES = 100_000
+
 # ── EQ log line timestamp pattern ─────────────────────────────────────────────
 _EQ_TS_RE = re.compile(
     r"^\[([A-Za-z]{3} [A-Za-z]{3} +\d{1,2} \d{2}:\d{2}:\d{2} \d{4})\]\s*(.*)$"
 )
 _EQ_TS_FMT = "%a %b %d %H:%M:%S %Y"
+
+# ── dbg.txt line timestamp pattern ────────────────────────────────────────────
+# Format: "2026-05-27 07:36:42\tMessage body"
+_DBG_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\t(.*)$")
+_DBG_TS_FMT = "%Y-%m-%d %H:%M:%S"
 
 
 # ── Log file discovery ─────────────────────────────────────────────────────────
@@ -139,11 +156,20 @@ class _TailThread(QThread):
     _POLL_MS = 50
     _POLL_MS_BACKGROUND = 250
 
-    def __init__(self, log_path: str, parent: Optional[QObject] = None) -> None:
+    def __init__(
+        self,
+        log_path: str,
+        parent: Optional[QObject] = None,
+        *,
+        seek_to_end: bool = True,
+        start_offset: int = 0,
+    ) -> None:
         super().__init__(parent)
         self._path = log_path
         self._running = False
         self._poll_ms = self._POLL_MS  # mutable — updated by set_poll_ms()
+        self._seek_to_end = seek_to_end
+        self._start_offset = start_offset
 
     def stop(self) -> None:
         """Request the thread to exit on its next poll iteration."""
@@ -157,12 +183,20 @@ class _TailThread(QThread):
         self._running = True
         try:
             with open(self._path, encoding="utf-8", errors="replace") as fh:
-                fh.seek(0, 2)  # start at end — ignore history
+                if self._start_offset > 0:
+                    fh.seek(self._start_offset)
+                elif self._seek_to_end:
+                    fh.seek(0, 2)
                 while self._running:
                     line = fh.readline()
                     if line:
                         self.line_available.emit(line.rstrip("\n"))
                     else:
+                        try:
+                            if os.path.getsize(self._path) < fh.tell():
+                                fh.seek(0)
+                        except OSError:
+                            pass
                         self.msleep(self._poll_ms)
         except OSError as exc:
             self.error.emit(str(exc))
@@ -192,9 +226,18 @@ class LogParserService(QObject):
 
     line_parsed = Signal(object)        # LogEvent
     raid_log_detected = Signal(list)   # list[str]
-    who_list_detected = Signal(list)    # list[WhoEntry]
+    who_list_detected = Signal(list, int)  # list[WhoEntry] (filtered), int (total parsed)
     active_file_changed = Signal(str)   # character name
-    zone_changed = Signal(str)          # zone name
+
+    game_started = Signal()              # EQ process launched (dbg.txt startup line)
+    startup_scan_started = Signal()     # dbg.txt historical scan about to begin
+    startup_scan_complete = Signal()    # dbg.txt historical scan finished; live tail about to begin
+    character_offline = Signal()        # character camped or inactivity timeout
+    character_at_select = Signal()      # character arrived at character select screen
+    character_entered_game = Signal()   # character entered a game zone
+
+    zone_changed = Signal(str)          # zone name (EQ log)
+    zone_connected = Signal(str, str)   # (character, zone) from dgb.txt — fires before zone_changed
     guild_message = Signal(str, str)    # (character, message)
     status_changed = Signal(str)        # "idle" | "running" | "error"
 
@@ -205,6 +248,7 @@ class LogParserService(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._thread: Optional[_TailThread] = None
+        self._dbg_thread: Optional[_TailThread] = None
         self._matchers: list[LogMatcher] = []
         self._status = "idle"
         self._log_directory: Optional[Path] = None
@@ -213,6 +257,7 @@ class LogParserService(QObject):
         # Built-in raid-log matcher
         self._raid_log_matcher = RaidLogMatcher(self)
         self._raid_log_matcher.raid_log_detected.connect(self.raid_log_detected)
+        self.active_file_changed.connect(self._raid_log_matcher.set_active_character)
         self.register_matcher(self._raid_log_matcher)
 
         # Built-in zone matcher
@@ -229,6 +274,39 @@ class LogParserService(QObject):
         self._who_list_matcher = WhoListMatcher(self)
         self._who_list_matcher.who_list_detected.connect(self.who_list_detected)
         self.register_matcher(self._who_list_matcher)
+
+        # Built-in camp matcher (EQ log countdown — no longer drives state directly;
+        # camp_complete from dgb.txt is the definitive signal)
+        self._camp_matcher = CampMatcher(self)
+        self.register_matcher(self._camp_matcher)
+
+        # dgb.txt matchers — character state transitions
+        self._camp_dbg_matcher = CampDbgMatcher(self)
+        # camp_complete fires after /camp or /camp desktop finishes.  For /camp,
+        # CharSelectDbgMatcher will also fire character_at_select moments later
+        # (harmless duplicate).  For /camp desktop, DisconnectDbgMatcher follows.
+        self._camp_dbg_matcher.camp_complete.connect(self.character_at_select)
+        self.register_matcher(self._camp_dbg_matcher)
+
+        self._zone_dbg_matcher = ZoneDbgMatcher(self)
+        self._zone_dbg_matcher.zone_connected.connect(self.zone_connected)
+        self.register_matcher(self._zone_dbg_matcher)
+
+        self._char_select_dbg_matcher = CharSelectDbgMatcher(self)
+        self._char_select_dbg_matcher.character_at_select.connect(self.character_at_select)
+        self.register_matcher(self._char_select_dbg_matcher)
+
+        self._enter_game_dbg_matcher = EnterGameDbgMatcher(self)
+        self._enter_game_dbg_matcher.character_entered_game.connect(self.character_entered_game)
+        self.register_matcher(self._enter_game_dbg_matcher)
+
+        self._disconnect_dbg_matcher = DisconnectDbgMatcher(self)
+        self._disconnect_dbg_matcher.character_offline.connect(self.character_offline)
+        self.register_matcher(self._disconnect_dbg_matcher)
+
+        self._startup_dbg_matcher = StartupDbgMatcher(self)
+        self._startup_dbg_matcher.game_started.connect(self.game_started)
+        self.register_matcher(self._startup_dbg_matcher)
 
         # Ordered list of built-in matchers exposed to the UI (those with MATCHER_KEY set)
         self._builtin_matchers: list[LogMatcher] = [
@@ -279,6 +357,13 @@ class LogParserService(QObject):
         return LogFileDiscovery.character_name(self._current_path)
 
     @property
+    def active_log_filename(self) -> str:
+        """Filename (not full path) of the log being tailed, or empty string."""
+        if self._current_path is None:
+            return ""
+        return self._current_path.name
+
+    @property
     def current_zone(self) -> str:
         """Most recently detected zone name, or empty string if unknown."""
         return self._zone_matcher.current_zone
@@ -310,13 +395,19 @@ class LogParserService(QObject):
             self._set_status("error")
             return
 
+        self.startup_scan_started.emit()
         self._switch_to_file(active)
+        dgb = directory / "dbg.txt"
+        offset = self._scan_recent_dbg(dgb) if dgb.exists() else 0
+        self._start_dbg_tail(directory, offset)
         self._dir_monitor.start()
+        self.startup_scan_complete.emit()
 
     def stop(self) -> None:
         """Stop tailing and shut down the directory monitor."""
         self._dir_monitor.stop()
         self._stop_tail()
+        self._stop_dbg_tail()
         self._log_directory = None
         self._current_path = None
         self._zone_matcher.reset()
@@ -339,6 +430,8 @@ class LogParserService(QObject):
 
         if self._thread is not None:
             self._thread.set_poll_ms(poll_ms)
+        if self._dbg_thread is not None:
+            self._dbg_thread.set_poll_ms(poll_ms)
         self._dir_monitor.setInterval(monitor_ms)
         log.debug(
             "Parser background mode %s: poll=%dms dir_monitor=%dms",
@@ -367,9 +460,56 @@ class LogParserService(QObject):
 
     def _stop_tail(self) -> None:
         if self._thread:
+            self._thread.finished.disconnect()
             self._thread.stop()
             self._thread.wait(2_000)
             self._thread = None
+
+    def _scan_recent_dbg(self, dbg_path: Path) -> int:
+        """Synchronously process recent dbg.txt history to establish current state.
+
+        Reads the last ``_DBG_SCAN_BYTES`` bytes of *dbg_path*, dispatches each
+        line through the normal matcher pipeline, and returns the file position
+        at end of scan so the async tail can start exactly there.
+
+        Because all signal connections are direct (same-thread) when ``start()``
+        is called, slots in GravityBotService run synchronously here — state is
+        correct before ``start()`` returns.
+        """
+        end_pos = 0
+        try:
+            size = dbg_path.stat().st_size
+            with open(dbg_path, encoding="utf-8", errors="replace") as fh:
+                seek_to = max(0, size - _DBG_SCAN_BYTES)
+                fh.seek(seek_to)
+                if seek_to > 0:
+                    fh.readline()  # discard partial line at the seek boundary
+                for line in fh:
+                    self._dispatch(self._parse_dbg(line.rstrip("\n")))
+                end_pos = fh.tell()
+            log.debug("dbg.txt scan complete: read from offset=%d, end_pos=%d", seek_to, end_pos)
+        except OSError as exc:
+            log.warning("dbg.txt scan failed: %s", exc)
+        return end_pos
+
+    def _start_dbg_tail(self, directory: Path, offset: int = 0) -> None:
+        """Start tailing dbg.txt in *directory* from *offset*, if the file exists."""
+        self._stop_dbg_tail()
+        dgb = directory / "dbg.txt"
+        if not dgb.exists():
+            log.debug("dbg.txt not found in %s — dbg tail not started", directory)
+            return
+        self._dbg_thread = _TailThread(str(dgb), self, start_offset=offset)
+        self._dbg_thread.line_available.connect(self._on_dbg_line)
+        self._dbg_thread.error.connect(self._on_error)
+        self._dbg_thread.start()
+        log.info("Tailing dbg.txt from offset=%d", offset)
+
+    def _stop_dbg_tail(self) -> None:
+        if self._dbg_thread:
+            self._dbg_thread.stop()
+            self._dbg_thread.wait(2_000)
+            self._dbg_thread = None
 
     def _set_status(self, status: str) -> None:
         if status != self._status:
@@ -382,26 +522,35 @@ class LogParserService(QObject):
         if self._log_directory is None:
             return
         active = LogFileDiscovery.find_active(self._log_directory)
-        if active is None or active == self._current_path:
-            return
-        log.info(
-            "Active log changed: %s → %s",
-            self._current_path.name if self._current_path else "none",
-            active.name,
-        )
-        self._switch_to_file(active)
+        if active is not None and active != self._current_path:
+            log.info(
+                "Active log changed: %s → %s",
+                self._current_path.name if self._current_path else "none",
+                active.name,
+            )
+            self._switch_to_file(active)
+            return  # _switch_to_file resets _dgb_offline_emitted
 
-    @Slot(str)
-    def _on_line(self, raw: str) -> None:
-        event = self._parse(raw)
+    def _dispatch(self, event: LogEvent) -> None:
+        """Emit *event* to all matchers subscribed to its source."""
         self.line_parsed.emit(event)
         for matcher in self._matchers:
             if not matcher.enabled:
+                continue
+            if event.source not in matcher.SOURCES:
                 continue
             try:
                 matcher.process(event)
             except Exception as exc:  # noqa: BLE001
                 log.error("Matcher %s raised: %s", matcher.name, exc)
+
+    @Slot(str)
+    def _on_line(self, raw: str) -> None:
+        self._dispatch(self._parse(raw))
+
+    @Slot(str)
+    def _on_dbg_line(self, raw: str) -> None:
+        self._dispatch(self._parse_dbg(raw))
 
     @Slot(str)
     def _on_error(self, message: str) -> None:
@@ -426,4 +575,25 @@ class LogParserService(QObject):
             ts = datetime.now()
             message = raw
 
-        return LogEvent(timestamp=ts, raw=raw, message=message, kind=LogEventKind.UNKNOWN)
+        return LogEvent(timestamp=ts, raw=raw, message=message, kind=LogEventKind.UNKNOWN,
+                        source=LogSource.EQ_LOG)
+
+    @staticmethod
+    def _parse_dbg(raw: str) -> LogEvent:
+        """Parse a raw dgb.txt line into a ``LogEvent``.
+
+        dgb.txt format: ``YYYY-MM-DD HH:MM:SS<TAB>message body``
+        """
+        m = _DBG_TS_RE.match(raw)
+        if m:
+            try:
+                ts = datetime.strptime(m.group(1), _DBG_TS_FMT)
+            except ValueError:
+                ts = datetime.now()
+            message = m.group(2)
+        else:
+            ts = datetime.now()
+            message = raw
+
+        return LogEvent(timestamp=ts, raw=raw, message=message, kind=LogEventKind.UNKNOWN,
+                        source=LogSource.DBG_TXT)

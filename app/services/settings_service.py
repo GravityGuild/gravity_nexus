@@ -148,6 +148,12 @@ class SettingsService:
                 pass
         q.endGroup()
 
+        # Who Lookup
+        q.beginGroup("who_lookup")
+        s.who_lookup.enabled = self._get(q, "enabled", s.who_lookup.enabled)
+        s.who_lookup.show_own_character = self._get(q, "show_own_character", s.who_lookup.show_own_character)
+        q.endGroup()
+
         # Feature Flags
         q.beginGroup("feature_flags")
         flags_raw = q.value("flags")
@@ -232,6 +238,11 @@ class SettingsService:
         q.setValue("collapsed", s.toolbar.collapsed)
         q.setValue("orientation", s.toolbar.orientation)
         q.setValue("button_keys", json.dumps(s.toolbar.button_keys))
+        q.endGroup()
+
+        q.beginGroup("who_lookup")
+        q.setValue("enabled", s.who_lookup.enabled)
+        q.setValue("show_own_character", s.who_lookup.show_own_character)
         q.endGroup()
 
         q.beginGroup("feature_flags")

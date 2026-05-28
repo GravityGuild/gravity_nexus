@@ -4,16 +4,22 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from ui.widgets.status_widgets import StatusIndicator
 from ui.widgets.themed_label import ThemedLabel
 from theme.spec import ColorRole, FontSize
 from _version import __version__
 
+_CHAR_STATE_MAP: dict[str, tuple[str, str]] = {
+    "in_game":   ("online",  "In Game"),
+    "at_select": ("warning", "Character Select"),
+    "offline":   ("offline", "Offline"),
+}
+
 
 class StatusBar(QWidget):
-    """Bottom status bar: parser state, EQ connection, future metrics."""
+    """Bottom status bar: parser state, character info, EQ connection."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -28,10 +34,14 @@ class StatusBar(QWidget):
         layout.setContentsMargins(18, 0, 18, 0)
         layout.setSpacing(16)
 
+        self._character_indicator = StatusIndicator("No Character", "offline")
+        layout.addWidget(self._character_indicator)
+
+        self._state_indicator = StatusIndicator("Offline", "offline")
+        layout.addWidget(self._state_indicator)
+
         self._parser_indicator = StatusIndicator("Parser: Stopped", "offline")
         layout.addWidget(self._parser_indicator)
-
-        # layout.addWidget(_make_sep())
 
         self._eq_indicator = StatusIndicator("Gravity Bot: Disconnected", "offline")
         layout.addWidget(self._eq_indicator)
@@ -58,11 +68,21 @@ class StatusBar(QWidget):
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def set_parser_running(self, running: bool, log_name: str = "") -> None:
+    def set_parser_running(self, running: bool, filename: str = "") -> None:
         if running:
-            self._parser_indicator.set_status("online", f"Parser: {log_name or 'Running'}")
+            self._parser_indicator.set_status("online", f"Parser: {filename or 'Active'}")
         else:
             self._parser_indicator.set_status("offline", "Parser: Stopped")
+
+    def set_character(self, character: str) -> None:
+        if character:
+            self._character_indicator.set_status("online", character)
+        else:
+            self._character_indicator.set_status("offline", "No Character")
+
+    def set_character_state(self, state: str) -> None:
+        dot, label = _CHAR_STATE_MAP.get(state, ("offline", "Offline"))
+        self._state_indicator.set_status(dot, label)
 
     def set_grav_bot_connected(self, connected: bool) -> None:
         if connected:
@@ -72,13 +92,3 @@ class StatusBar(QWidget):
 
     def set_metrics(self, text: str) -> None:
         self._metrics_label.setText(text)
-
-
-def _make_sep() -> QFrame:
-    """Return a 1 px tall vertical separator styled for the status bar."""
-    sep = QFrame()
-    sep.setFrameShape(QFrame.Shape.VLine)
-    sep.setFrameShadow(QFrame.Shadow.Plain)
-    sep.setFixedSize(10, 14)
-    sep.setStyleSheet("color: rgba(87, 199, 255, 30);")
-    return sep

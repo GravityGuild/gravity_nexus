@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
@@ -14,6 +13,7 @@ from theme.colors import (
     TEXT_SECONDARY_RGB,
     WARNING_RGB,
 )
+from ui.widgets.h_line import HLine
 
 # ── SectionHeader ─────────────────────────────────────────────────────────────
 
@@ -32,23 +32,8 @@ class SectionHeader(QWidget):
         label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         layout.addWidget(label)
 
-        line = _HLine()
+        line = HLine()
         layout.addWidget(line)
-
-
-class _HLine(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setFixedHeight(1)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-    def paintEvent(self, event) -> None:  # noqa: ANN001
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor(*ACCENT_CYAN_RGB, 35), 1))
-        mid = self.height() // 2
-        p.drawLine(0, mid, self.width(), mid)
-        p.end()
 
 
 # ── StatusIndicator ───────────────────────────────────────────────────────────

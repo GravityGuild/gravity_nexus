@@ -13,5 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Security` in case of vulnerabilities.
 
 
-## [Unreleased]
+## Unreleased
 
+
+## v0.2.0
+
+### Added
+- The app now sends current character info to gravity bot
+- Send /who command results to gravity bot
+- Added /who character lookup
+
+
+## v0.1.0
+
+### Added
+- Capturing /who raid logs and sending them to gravity bot to automatically update attendance
+- Forwarding guild chat to gravity bot to be displayed in guild-chat-stream
+- Login through the gravityp99.com website

@@ -1,13 +1,4 @@
-"""FakeLogPage — developer tool for replaying/injecting fake EQ log lines.
-
-Provides three injection mechanisms:
-  1. **Manual** — type any body text and click Inject.
-  2. **Presets** — drop-down of canned EQ scenarios (zone changes, guild chat, etc.).
-  3. **File Replay** — load a ``.txt`` file and play back each line with a
-     configurable delay.
-
-The page also shows a live feed of every line written to the fake log.
-"""
+"""DevToolsPage — developer utilities: log injection, auth tools, and app state."""
 from __future__ import annotations
 
 import logging
@@ -24,6 +15,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSizePolicy,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -57,7 +49,6 @@ def _decode_jwt_exp(token: str) -> str | None:
     return None
 
 
-# Speed options: (display label, interval_ms)
 _SPEED_OPTIONS: list[tuple[str, int]] = [
     ("Slow (1 s / line)", 1000),
     ("Normal (500 ms / line)", 500),
@@ -66,12 +57,11 @@ _SPEED_OPTIONS: list[tuple[str, int]] = [
     ("Instant", 0),
 ]
 
-# Max lines shown in the live feed
 _MAX_FEED_LINES = 200
 
 
-class FakeLogPage(QWidget):
-    """Developer/testing page for injecting fake EQ log lines."""
+class DevToolsPage(QWidget):
+    """Developer utilities page: log injection, auth tools, and app state."""
 
     def __init__(
         self,
@@ -91,125 +81,128 @@ class FakeLogPage(QWidget):
     # ── UI construction ────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        container = QWidget()
-        container.setObjectName("PageWrapper")
-        vl = QVBoxLayout(container)
-        vl.setContentsMargins(24, 20, 24, 20)
-        vl.setSpacing(16)
+        header = QWidget()
+        hl = QVBoxLayout(header)
+        hl.setContentsMargins(24, 20, 24, 8)
+        hl.setSpacing(4)
 
-        # ── Header ────────────────────────────────────────────────────────────
         title = ThemedLabel(
-            "Log Replay / Dev Tools",
+            "Dev Tools",
             font_size=FontSize.XL,
             color_role=ColorRole.TEXT_PRIMARY,
             font_role=FontRole.DISPLAY,
         )
         title.setObjectName("PageTitle")
-        vl.addWidget(title)
+        hl.addWidget(title)
 
         sub = ThemedLabel(
-            "Inject fake EQ log lines into the parser pipeline for testing "
-            "matchers, overlays, and notifications — no real EverQuest session required.",
+            "Developer utilities: log injection, auth tools, and app state.",
             font_size=FontSize.SMALL,
             color_role=ColorRole.TEXT_SECONDARY,
             word_wrap=True,
         )
         sub.setObjectName("PageSubtitle")
-        vl.addWidget(sub)
-        vl.addSpacing(4)
+        hl.addWidget(sub)
+        outer.addWidget(header)
 
-        # ── Session card ──────────────────────────────────────────────────────
+        self._tabs = QTabWidget()
+        self._tabs.setObjectName("PageTabs")
+        self._tabs.addTab(self._build_log_injection_tab(), "Log Injection")
+        self._tabs.addTab(self._build_auth_tab(), "Auth")
+        self._tabs.addTab(self._build_app_tab(), "App")
+        outer.addWidget(self._tabs)
+
+    def _make_tab_scroll(self) -> tuple[QScrollArea, QVBoxLayout]:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        vl = QVBoxLayout(container)
+        vl.setContentsMargins(24, 16, 24, 16)
+        vl.setSpacing(16)
+        scroll.setWidget(container)
+        return scroll, vl
+
+    def _build_log_injection_tab(self) -> QScrollArea:
+        scroll, vl = self._make_tab_scroll()
+
         session_card = SettingsCard(
             "Test Session",
             "Start a fake-log session so the parser tails a temporary file. "
             "Any active real-log session will be paused while the test session is running.",
         )
-        vl.addWidget(session_card)
+        char_row = QHBoxLayout()
+        char_lbl = ThemedLabel("Character:")
+        char_lbl.setFixedWidth(80)
+        self._char_name_edit = ThemedLineEdit("TestDummy")
+        self._char_name_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        char_row.addWidget(char_lbl)
+        char_row.addWidget(self._char_name_edit)
+        char_row.addStretch()
+        session_card.add_layout(char_row)
 
         session_btn_row = QHBoxLayout()
-        self._start_session_btn = ThemedButton(
-            "▶  Start Test Session", ThemedButton.VARIANT_PRIMARY
-        )
-        self._stop_session_btn = ThemedButton(
-            "■  Stop Test Session", ThemedButton.VARIANT_DANGER
-        )
+        self._start_session_btn = ThemedButton("▶  Start Test Session", ThemedButton.VARIANT_PRIMARY)
+        self._stop_session_btn = ThemedButton("■  Stop Test Session", ThemedButton.VARIANT_DANGER)
         self._stop_session_btn.setEnabled(False)
         session_btn_row.addWidget(self._start_session_btn)
         session_btn_row.addWidget(self._stop_session_btn)
         session_btn_row.addStretch()
         session_card.add_layout(session_btn_row)
-
         self._session_status_lbl = ThemedLabel(
-            "Session inactive",
-            font_size=FontSize.SMALL,
-            color_role=ColorRole.TEXT_MUTED,
+            "Session inactive", font_size=FontSize.SMALL, color_role=ColorRole.TEXT_MUTED
         )
         session_card.add_widget(self._session_status_lbl)
+        vl.addWidget(session_card)
 
-        # ── Manual injection card ─────────────────────────────────────────────
         manual_card = SettingsCard(
             "Manual Injection",
-            "Type any EQ log message body below. "
-            "The EQ timestamp bracket is added automatically.",
+            "Type any EQ log message body below. The EQ timestamp bracket is added automatically.",
         )
-        vl.addWidget(manual_card)
-
         inject_row = QHBoxLayout()
-        self._manual_edit = ThemedLineEdit(
-            "e.g.  You have entered Plane of Time."
-        )
-        self._manual_edit.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        self._manual_edit = ThemedLineEdit("e.g.  You have entered Plane of Time.")
+        self._manual_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._manual_btn = ThemedButton("Inject", ThemedButton.VARIANT_SECONDARY)
         self._manual_btn.setEnabled(False)
         inject_row.addWidget(self._manual_edit)
         inject_row.addWidget(self._manual_btn)
         manual_card.add_layout(inject_row)
-
         self._manual_edit.returnPressed.connect(self._on_inject_manual)
         self._manual_btn.clicked.connect(self._on_inject_manual)
+        vl.addWidget(manual_card)
 
-        # ── Preset card ───────────────────────────────────────────────────────
         preset_card = SettingsCard(
             "Preset Scenarios",
             "Inject a pre-built scenario to test specific matchers.",
         )
-        vl.addWidget(preset_card)
-
         preset_row = QHBoxLayout()
         self._preset_combo = ThemedComboBox()
         for name in PRESETS:
             self._preset_combo.addItem(name)
-        self._preset_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        self._preset_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._preset_btn = ThemedButton("Inject Preset", ThemedButton.VARIANT_SECONDARY)
         self._preset_btn.setEnabled(False)
         preset_row.addWidget(self._preset_combo)
         preset_row.addWidget(self._preset_btn)
         preset_card.add_layout(preset_row)
         self._preset_btn.clicked.connect(self._on_inject_preset)
+        vl.addWidget(preset_card)
 
-        # ── File replay card ──────────────────────────────────────────────────
         replay_card = SettingsCard(
             "File Replay",
             "Load a plain-text file (one log-line body per line) and replay "
             "it at a chosen speed. EQ timestamps are added automatically.",
         )
-        vl.addWidget(replay_card)
-
         file_row = QHBoxLayout()
         self._replay_file_edit = ThemedLineEdit("No file selected")
         self._replay_file_edit.setReadOnly(True)
-        self._replay_file_edit.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
+        self._replay_file_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         browse_btn = ThemedButton("Browse…", ThemedButton.VARIANT_SECONDARY)
         browse_btn.clicked.connect(self._on_browse_replay_file)
         file_row.addWidget(self._replay_file_edit)
@@ -221,13 +214,12 @@ class FakeLogPage(QWidget):
         self._speed_combo = ThemedComboBox()
         for label, _ in _SPEED_OPTIONS:
             self._speed_combo.addItem(label)
-        self._speed_combo.setCurrentIndex(1)  # Normal by default
+        self._speed_combo.setCurrentIndex(1)
         speed_row.addWidget(speed_lbl)
         speed_row.addWidget(self._speed_combo)
         speed_row.addStretch()
         replay_card.add_layout(speed_row)
 
-        # Progress bar (hidden until replay starts)
         self._replay_progress = QProgressBar()
         self._replay_progress.setVisible(False)
         self._replay_progress.setTextVisible(True)
@@ -235,13 +227,9 @@ class FakeLogPage(QWidget):
         replay_card.add_widget(self._replay_progress)
 
         replay_btn_row = QHBoxLayout()
-        self._replay_start_btn = ThemedButton(
-            "▶  Start Replay", ThemedButton.VARIANT_PRIMARY
-        )
+        self._replay_start_btn = ThemedButton("▶  Start Replay", ThemedButton.VARIANT_PRIMARY)
         self._replay_start_btn.setEnabled(False)
-        self._replay_stop_btn = ThemedButton(
-            "■  Stop Replay", ThemedButton.VARIANT_DANGER
-        )
+        self._replay_stop_btn = ThemedButton("■  Stop Replay", ThemedButton.VARIANT_DANGER)
         self._replay_stop_btn.setEnabled(False)
         replay_btn_row.addWidget(self._replay_start_btn)
         replay_btn_row.addWidget(self._replay_stop_btn)
@@ -249,31 +237,32 @@ class FakeLogPage(QWidget):
         replay_card.add_layout(replay_btn_row)
         self._replay_start_btn.clicked.connect(self._on_start_replay)
         self._replay_stop_btn.clicked.connect(self._on_stop_replay)
+        vl.addWidget(replay_card)
 
-        # ── Live feed card ────────────────────────────────────────────────────
         feed_card = SettingsCard(
             "Live Feed",
             "Lines injected into the fake log file will appear here in real time.",
         )
-        vl.addWidget(feed_card)
-
         self._feed = QPlainTextEdit()
         self._feed.setReadOnly(True)
         self._feed.setMaximumBlockCount(_MAX_FEED_LINES)
         self._feed.setFixedHeight(220)
         feed_card.add_widget(self._feed)
-
         clear_feed_btn = ThemedButton("Clear Feed", ThemedButton.VARIANT_SECONDARY)
         clear_feed_btn.clicked.connect(self._feed.clear)
         feed_card.add_widget(clear_feed_btn)
+        vl.addWidget(feed_card)
 
-        # ── Access Token card ─────────────────────────────────────────────────
+        vl.addStretch()
+        return scroll
+
+    def _build_auth_tab(self) -> QScrollArea:
+        scroll, vl = self._make_tab_scroll()
+
         token_card = SettingsCard(
             "Access Token",
             "View or copy the JWT access token for the current session.",
         )
-        vl.addWidget(token_card)
-
         token_row = QHBoxLayout()
         self._token_field = QLineEdit()
         self._token_field.setReadOnly(True)
@@ -287,26 +276,24 @@ class FakeLogPage(QWidget):
         self._copy_btn = ThemedButton("Copy", ThemedButton.VARIANT_SECONDARY)
         self._copy_btn.clicked.connect(self._on_copy_token)
         token_row.addWidget(self._copy_btn)
-
         token_card.add_layout(token_row)
 
-        self._expiry_lbl = ThemedLabel(
-            "",
-            font_size=FontSize.SMALL,
-            color_role=ColorRole.TEXT_MUTED,
-        )
+        self._expiry_lbl = ThemedLabel("", font_size=FontSize.SMALL, color_role=ColorRole.TEXT_MUTED)
         token_card.add_widget(self._expiry_lbl)
+        vl.addWidget(token_card)
 
+        vl.addStretch()
         self._token_visible = False
         self._refresh_token_display()
+        return scroll
 
-        # ── Setup Wizard card ─────────────────────────────────────────────────
+    def _build_app_tab(self) -> QScrollArea:
+        scroll, vl = self._make_tab_scroll()
+
         wizard_card = SettingsCard(
             "Setup Wizard",
             "Reset the first-run flag so the setup wizard runs again on next launch.",
         )
-        vl.addWidget(wizard_card)
-
         wizard_row = QHBoxLayout()
         wizard_lbl = ThemedLabel("Wizard completed flag", color_role=ColorRole.TEXT_SECONDARY)
         wizard_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -323,13 +310,10 @@ class FakeLogPage(QWidget):
         )
         self._wizard_reset_lbl.setVisible(False)
         wizard_card.add_widget(self._wizard_reset_lbl)
+        vl.addWidget(wizard_card)
 
         vl.addStretch()
-        scroll.setWidget(container)
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(scroll)
+        return scroll
 
     # ── Signal wiring ──────────────────────────────────────────────────────────
 
@@ -348,7 +332,7 @@ class FakeLogPage(QWidget):
 
     @Slot()
     def _on_start_session(self) -> None:
-        self._svc.start(self._parser_svc)
+        self._svc.start(self._parser_svc, character_name=self._char_name_edit.text())
 
     @Slot()
     def _on_stop_session(self) -> None:
@@ -357,17 +341,15 @@ class FakeLogPage(QWidget):
     @Slot()
     def _refresh_session_state(self) -> None:
         active = self._svc.is_active
+        self._char_name_edit.setReadOnly(active)
         self._start_session_btn.setEnabled(not active)
         self._stop_session_btn.setEnabled(active)
         self._manual_btn.setEnabled(active)
         self._preset_btn.setEnabled(active)
-        self._replay_start_btn.setEnabled(
-            active and self._replay_file_path is not None
-        )
+        self._replay_start_btn.setEnabled(active and self._replay_file_path is not None)
         if active:
             self._session_status_lbl.setText(
-                f"✓  Session active — tailing fake log for character "
-                f'"{self._svc.character_name}"'
+                f'✓  Session active — tailing fake log for character "{self._svc.character_name}"'
             )
             self._session_status_lbl.set_color_role(ColorRole.SUCCESS)
         else:
@@ -397,10 +379,7 @@ class FakeLogPage(QWidget):
     @Slot()
     def _on_browse_replay_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Log Replay File",
-            "",
-            "Text files (*.txt);;All files (*.*)",
+            self, "Select Log Replay File", "", "Text files (*.txt);;All files (*.*)"
         )
         if path:
             self._replay_file_path = Path(path)
@@ -412,18 +391,13 @@ class FakeLogPage(QWidget):
         if not self._replay_file_path or not self._svc.is_active:
             return
         try:
-            raw_lines = self._replay_file_path.read_text(
-                encoding="utf-8", errors="replace"
-            ).splitlines()
+            raw_lines = self._replay_file_path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError as exc:
             log.error("Failed to read replay file: %s", exc)
             return
-
-        # Strip empty lines
         lines = [ln for ln in raw_lines if ln.strip()]
         if not lines:
             return
-
         interval_ms = _SPEED_OPTIONS[self._speed_combo.currentIndex()][1]
         self._replay_progress.setValue(0)
         self._replay_progress.setMaximum(len(lines))
@@ -438,7 +412,6 @@ class FakeLogPage(QWidget):
     @Slot(str)
     def _on_line_injected(self, raw: str) -> None:
         self._feed.appendPlainText(raw)
-        # Auto-scroll to bottom
         sb = self._feed.verticalScrollBar()
         sb.setValue(sb.maximum())
 
@@ -453,9 +426,7 @@ class FakeLogPage(QWidget):
     @Slot()
     def _on_replay_finished(self) -> None:
         self._replay_stop_btn.setEnabled(False)
-        self._replay_start_btn.setEnabled(
-            self._svc.is_active and self._replay_file_path is not None
-        )
+        self._replay_start_btn.setEnabled(self._svc.is_active and self._replay_file_path is not None)
         self._replay_progress.setVisible(False)
 
     @Slot(int, int)

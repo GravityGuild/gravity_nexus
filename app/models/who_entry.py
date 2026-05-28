@@ -55,6 +55,7 @@ class WhoEntry:
     guild: Optional[str]
     is_afk: bool
     raw_line: str
+    zone: Optional[str] = None
 
     # ── Convenience predicates ─────────────────────────────────────────────────
 

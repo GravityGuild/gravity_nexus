@@ -11,6 +11,7 @@ from ui.widgets.themed_widgets import (
 )
 from ui.widgets.toggle_switch import ToggleSwitch
 from ui.widgets.search_box import SearchBox
+from ui.widgets.h_line import HLine
 from ui.widgets.status_widgets import SectionHeader, StatusIndicator
 from ui.widgets.overlay_preview import OverlayPreviewPanel
 
@@ -27,6 +28,7 @@ __all__ = [
     "ThemedTable",
     "ToggleSwitch",
     "SearchBox",
+    "HLine",
     "SectionHeader",
     "StatusIndicator",
     "OverlayPreviewPanel",

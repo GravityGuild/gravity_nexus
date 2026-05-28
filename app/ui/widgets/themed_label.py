@@ -52,12 +52,12 @@ class ThemedLabel(QLabel):
 
     def __init__(
         self,
-        text:       str                = "",
-        font_size:  FontSize           = FontSize.MEDIUM,
-        color_role: ColorRole          = ColorRole.TEXT_PRIMARY,
-        font_role:  FontRole           = FontRole.BODY,
-        word_wrap:  bool               = False,
-        parent:     Optional[QWidget]  = None,
+        text: str = "",
+        font_size: FontSize = FontSize.MEDIUM,
+        color_role: ColorRole = ColorRole.TEXT_PRIMARY,
+        font_role: FontRole = FontRole.BODY,
+        word_wrap: bool = False,
+        parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(text, parent)
         self.setWordWrap(word_wrap)

@@ -1,5 +1,5 @@
 """Pages package."""
-from ui.pages.fake_log_page import FakeLogPage
+from ui.pages.dev_tools_page import DevToolsPage
 from ui.pages.feature_flags_page import FeatureFlagsPage
 from ui.pages.general_page import GeneralPage
 from ui.pages.gravity_bot_page import GravityBotPage
@@ -15,7 +15,7 @@ from ui.pages.pages import (
 )
 
 __all__ = [
-    "FakeLogPage",
+    "DevToolsPage",
     "FeatureFlagsPage",
     "GeneralPage",
     "GravityBotPage",

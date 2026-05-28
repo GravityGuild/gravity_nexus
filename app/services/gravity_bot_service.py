@@ -42,7 +42,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 from auth.api_client import ApiClient
 from auth.auth_manager import AuthManager
-from models.bot_notification import BotNotification, KIND_UNKNOWN
+from models.bot_notification import BotNotification, KIND_CHARACTER_SET_RESULT, KIND_UNKNOWN
 
 log = logging.getLogger(__name__)
 
@@ -183,11 +183,15 @@ class _WsThread(QThread):
             if isinstance(raw, bytes):
                 raw = raw.decode()
             data = json.loads(raw)
-            notif = BotNotification(
-                kind=data.get("kind", KIND_UNKNOWN),
-                payload=data.get("payload", {}),
-            )
-            self.notification_received.emit(notif)
+            if "kind" in data:
+                # Legacy kind/payload envelope
+                kind = data.get("kind", KIND_UNKNOWN)
+                payload = data.get("payload", {})
+            else:
+                # Flat type-keyed messages (e.g. character_set_result)
+                kind = data.get("type", KIND_UNKNOWN)
+                payload = {k: v for k, v in data.items() if k != "type"}
+            self.notification_received.emit(BotNotification(kind=kind, payload=payload))
         except Exception as exc:  # noqa: BLE001
             log.warning("Failed to parse bot message: %s | raw=%r", exc, raw)
 
@@ -274,6 +278,24 @@ class GravityBotService(QObject):
     notification_received = Signal(object)   # BotNotification
     submit_result = Signal(bool, str)
     raids_fetched = Signal(bool, str)        # success, json_body
+    character_fetched = Signal(bool, str)    # success, json_body
+
+    _CHARACTER_SET_MAX_RETRIES = 3
+    _CHARACTER_SET_RETRY_MS = 2_000
+    # No log activity for this long → assume force-quit or crashed client
+    _INACTIVITY_TIMEOUT_MS = 1_800_000  # 30 minutes
+
+    _WHO_DEDUP_WINDOW: float = 30.0    # seconds — suppress identical who_result within this window
+    _WHO_REFRESH_WINDOW: float = 300.0  # seconds — force re-send after this long for last-seen refresh
+
+    _WHO_DEDUP_WINDOW: float = 30.0    # seconds — suppress identical who_result within this window
+    _WHO_REFRESH_WINDOW: float = 300.0 # seconds — force re-send after this long for last-seen refresh
+
+    # Character state values sent in the ``state`` field of ``character_set``
+    STATE_IN_GAME = "IN_GAME"
+    STATE_CHARACTER_SELECT = "CHARACTER_SELECT"
+    STATE_AVAILABLE = "AVAILABLE"
+    NO_CHARACTER = "NO_CHARACTER"
 
     def __init__(self, auth_manager: AuthManager, api_client: ApiClient) -> None:
         super().__init__()
@@ -283,10 +305,24 @@ class GravityBotService(QObject):
         self._submit_threads: list[_RestSubmitThread] = []
         self._connected = False
         self._seq: int = 0  # monotonically increasing per session; reset on reconnect
+        self._current_character: Optional[str] = None
+        self._current_state: str = self.STATE_IN_GAME
+        self._character_set_retries: int = 0
+        self._character_set_retry_timer = QTimer(self)
+        self._character_set_retry_timer.setSingleShot(True)
+        self._character_set_retry_timer.timeout.connect(self._retry_character_set)
+        self._inactivity_timer = QTimer(self)
+        self._inactivity_timer.setSingleShot(True)
+        self._inactivity_timer.setInterval(self._INACTIVITY_TIMEOUT_MS)
+        self._inactivity_timer.timeout.connect(self._on_inactivity_timeout)
         self._raids_cache: Optional[tuple[bool, str]] = None
         self._raids_cache_ts: float = 0.0
         self._raids_fetch_in_flight: bool = False
+        self._scan_in_progress: bool = False
+        self._last_who_hash: str | None = None
+        self._last_who_sent: float = 0.0
         self.connected_changed.connect(self._on_connected_changed)
+        self.notification_received.connect(self._on_notification)
         self.raids_fetched.connect(self._cache_raids_result)
 
     # ── Properties ─────────────────────────────────────────────────────────────
@@ -374,6 +410,20 @@ class GravityBotService(QObject):
         else:
             self.fetch_raids(date_from=date_from, limit=limit)
 
+    def fetch_character(self, name: str) -> None:
+        """Non-blocking GET of /api/v1/characters for a single character by name."""
+        thread = _RestSubmitThread(
+            api=self._api,
+            request_type=HttpRequestType.GET,
+            request_url="/api/v1/characters",
+            params={"name": name, "limit": 1, "include": "alts,dkp,items"},
+            parent=self,
+        )
+        thread.submit_done.connect(self.character_fetched)
+        thread.finished.connect(lambda: self._submit_threads.remove(thread))
+        self._submit_threads.append(thread)
+        thread.start()
+
     def submit_raid_log(self, channel_id: int, full_who_log: str) -> None:
         """Non-blocking POST of the who-log to the bot's raid attendance endpoint."""
         thread = _RestSubmitThread(
@@ -388,6 +438,50 @@ class GravityBotService(QObject):
         thread.finished.connect(lambda: self._submit_threads.remove(thread))
         self._submit_threads.append(thread)
         thread.start()
+
+    @Slot(str)
+    def set_character(self, character: str, state: str = STATE_IN_GAME) -> None:
+        """Identify the active character and notify the bot over the WebSocket.
+
+        Pass an empty string or ``NO_CHARACTER`` to declare no active character.
+        *state* is one of ``IN_GAME``, ``CHARACTER_SELECT``, or ``AVAILABLE`` and
+        is ignored when *character* resolves to ``NO_CHARACTER``.
+        """
+        if not character:
+            character = self.NO_CHARACTER
+        self._character_set_retry_timer.stop()
+        self._character_set_retries = 0
+        self._current_character = character
+        self._current_state = state if character != self.NO_CHARACTER else self.STATE_AVAILABLE
+        log.info("set_character: Character=%s - State=%s", self._current_character, self._current_state)
+
+        if character != self.NO_CHARACTER:
+            self._inactivity_timer.start()
+        else:
+            self._inactivity_timer.stop()
+        self._send_character_set()
+
+    def update_character_state(self, state: str) -> None:
+        """Send a state-only update for the current character.
+
+        Silently ignored if no character has been set or the character is
+        ``NO_CHARACTER``.  Use this to transition between ``IN_GAME``,
+        ``CHARACTER_SELECT``, and ``AVAILABLE`` without re-identifying.
+        """
+        log.info("update_character_state: Character=%s - State=%s", self._current_character, state)
+        if not self._current_character or self._current_character == self.NO_CHARACTER:
+            return
+
+        self._current_state = state
+        if state == self.STATE_CHARACTER_SELECT:
+            self._inactivity_timer.stop()
+        self._send_character_set()
+
+    @Slot()
+    def notify_log_activity(self) -> None:
+        """Reset the inactivity timer.  Call this on every parsed log line."""
+        if self._current_character:
+            self._inactivity_timer.start()
 
     def send_guild_chat(self, character: str, message: str) -> None:
         """Forward a parsed guild-chat message to the bot over the WebSocket.
@@ -418,6 +512,39 @@ class GravityBotService(QObject):
         if sent:
             log.debug("Guild chat forwarded to bot (seq=%d): [%s] %s", self._seq, character, message)
 
+    def send_who_result(self, entries: list) -> None:
+        """Forward a /who result to the bot over the WebSocket.
+
+        Sends ``{"type": "who_result", "characters": [...]}`` with the names
+        from *entries*.  Identical results are suppressed within
+        ``_WHO_DEDUP_WINDOW`` seconds; after ``_WHO_REFRESH_WINDOW`` the same
+        list is re-sent so the bot can update last-seen timestamps.
+        """
+        import time
+
+        from core.registry import registry
+        from services.protocols import ISettingsService
+
+        if not registry.get(ISettingsService).settings.gravity_bot.send_who_result:
+            return
+        if not self._connected or self._ws_thread is None:
+            return
+
+        names = sorted(e.name for e in entries)
+        current_hash = ",".join(names)
+        now = time.monotonic()
+        elapsed = now - self._last_who_sent
+
+        if current_hash == self._last_who_hash and elapsed < self._WHO_REFRESH_WINDOW:
+            return  # identical and not yet due for a last-seen refresh
+
+        self._last_who_hash = current_hash
+        self._last_who_sent = now
+        payload = {"type": "who_result", "characters": names}
+        sent = self._ws_thread.send_message(payload)
+        if sent:
+            log.debug("who_result sent: %d characters", len(names))
+
     def shutdown(self) -> None:
         """Gracefully stop all background threads.  Call from MainWindow.closeEvent."""
         self.disconnect_bot()
@@ -433,11 +560,86 @@ class GravityBotService(QObject):
         self._raids_cache_ts = time.monotonic()
         self._raids_fetch_in_flight = False
 
+    @Slot()
+    def begin_scan(self) -> None:
+        """Suppress WebSocket character_set sends while dbg.txt history is replayed."""
+        self._scan_in_progress = True
+        log.debug("bot scan-suppression: ON")
+
+    @Slot()
+    def end_scan(self) -> None:
+        """Re-enable WebSocket sends and flush the final character state."""
+        self._scan_in_progress = False
+        log.debug("bot scan-suppression: OFF")
+        self._send_character_set()
+
+    def _send_character_set(self) -> None:
+        """Build and send the current character_set message over the WebSocket."""
+        if self._scan_in_progress:
+            return
+        if not self._connected or self._ws_thread is None:
+            return
+        payload: dict = {"type": "character_set", "character": self._current_character}
+        if self._current_character != self.NO_CHARACTER:
+            payload["state"] = self._current_state
+        self._ws_thread.send_message(payload)
+        log.debug("character_set sent: %s (state=%s)", self._current_character, self._current_state)
+
     @Slot(bool)
     def _on_connected_changed(self, connected: bool) -> None:
-        if connected and not self._connected:
-            self._seq = 0  # reset sequence counter for the new session
+        was_connected = self._connected
         self._connected = connected
+        if connected and not was_connected:
+            self._seq = 0  # reset sequence counter for the new session
+            if self._current_character is not None:
+                self._send_character_set()
+
+    @Slot(object)
+    def _on_notification(self, notif: BotNotification) -> None:
+        if notif.kind != KIND_CHARACTER_SET_RESULT:
+            return
+        if notif.payload.get("success"):
+            self._character_set_retries = 0
+            log.debug(
+                "character_set confirmed: character=%s guild_member=%s state=%s",
+                notif.payload.get("character"),
+                notif.payload.get("is_guild_member"),
+                notif.payload.get("state"),
+            )
+        else:
+            reason = notif.payload.get("reason", "unknown")
+            if self._character_set_retries < self._CHARACTER_SET_MAX_RETRIES:
+                self._character_set_retries += 1
+                log.warning(
+                    "character_set failed (reason=%s), retry %d/%d in %d ms",
+                    reason, self._character_set_retries, self._CHARACTER_SET_MAX_RETRIES,
+                    self._CHARACTER_SET_RETRY_MS,
+                )
+                self._character_set_retry_timer.start(self._CHARACTER_SET_RETRY_MS)
+            else:
+                log.warning(
+                    "character_set failed (reason=%s) after %d retries, giving up",
+                    reason, self._CHARACTER_SET_MAX_RETRIES,
+                )
+                self._character_set_retries = 0
+
+    @Slot()
+    def _retry_character_set(self) -> None:
+        if self._current_character is not None:
+            self._send_character_set()
+            log.debug(
+                "character_set retry %d/%d: %s",
+                self._character_set_retries, self._CHARACTER_SET_MAX_RETRIES, self._current_character,
+            )
+
+    @Slot()
+    def _on_inactivity_timeout(self) -> None:
+        log.info(
+            "No log activity for %d s — clearing character (was: %s)",
+            self._INACTIVITY_TIMEOUT_MS // 1000,
+            self._current_character,
+        )
+        self.set_character("")
 
 
 
