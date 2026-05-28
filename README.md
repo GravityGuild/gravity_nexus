@@ -5,11 +5,10 @@
 Gravity Nexus is a desktop companion app for Gravity guild members. It provides in-game tools like raid log submission, character lookup, and more. It integrates with Gravity Bot and the DKP website. Similar to EQ Tools, GINA, or Pulse, it works by reading your log files.
 
 <br>
+<br>
 
 ![Gravity Nexus](docs/images/gravity_nexus_main_window_v0_2_0.PNG)
 
-
----
 
 ## Installation
 
@@ -24,7 +23,6 @@ Gravity Nexus is a desktop companion app for Gravity guild members. It provides 
 2. Run `GravityNexus_Setup_x.x.x.exe` and follow the on-screen prompts.
 3. Launch **Gravity Nexus** from the Start Menu or Desktop shortcut.
 
----
 
 ## Setup & Configuration
 
@@ -38,7 +36,6 @@ Gravity Nexus is a desktop companion app for Gravity guild members. It provides 
 
 3. **You're ready** — All preferences can be changed later.
 
----
 
 ## Features
 
