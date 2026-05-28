@@ -224,6 +224,20 @@ QWidget {{
 }}
 #ToolCardTabs QTabBar::tab:hover    {{ color: {tp}; border-bottom: 2px solid rgba(87, 199, 255, 60); }}
 #ToolCardTabs QTabBar::tab:selected {{ color: {ap}; font-weight: bold; border-bottom: 2px solid {ap}; }}
+/* ═══ PAGE TABS ════════════════════════════════════════════════════════════ */
+#PageTabs            {{ background: transparent; border: none; }}
+#PageTabs::pane      {{ background: transparent; border: none; border-top: 1px solid rgba(87, 199, 255, 25); }}
+#PageTabs QTabBar::tab {{
+    background: transparent;
+    color: {ts};
+    font-size: {sz[FontSize.MEDIUM]}px;
+    padding: 8px 20px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    min-width: 90px;
+}}
+#PageTabs QTabBar::tab:hover    {{ color: {tp}; border-bottom: 2px solid rgba(87, 199, 255, 60); }}
+#PageTabs QTabBar::tab:selected {{ color: {ap}; font-weight: bold; border-bottom: 2px solid {ap}; }}
 /* ═══ SECTION HEADER ═══════════════════════════════════════════════════════ */
 #SectionHeader {{ color: {ap}; font-size: {sz[FontSize.SMALL]}px; font-weight: bold; }}
 /* ═══ BUTTONS ══════════════════════════════════════════════════════════════ */

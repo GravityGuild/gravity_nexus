@@ -49,6 +49,7 @@ class ToolCard(QFrame):
     """
 
     enabled_changed = Signal(bool)
+    expanded_changed = Signal(bool)
 
     def __init__(
         self,
@@ -191,6 +192,7 @@ class ToolCard(QFrame):
         if self._expanded == expanded:
             return
         self._expanded = expanded
+        self.expanded_changed.emit(expanded)
         self._chevron_label.set_icon(AppIcon.CHEVRON_DOWN if expanded else AppIcon.CHEVRON_RIGHT)
         self._anim.stop()
 

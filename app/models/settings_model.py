@@ -68,6 +68,7 @@ class GravityBotSettings:
     ws_enabled: bool = True  # enable WebSocket connection thread
     auto_connect: bool = True  # connect automatically on app start
     send_guild_chat: bool = True  # forward parsed guild chat to bot via WebSocket
+    send_who_result: bool = True  # forward /who results to bot via WebSocket
 
 
 @dataclass
@@ -78,6 +79,18 @@ class ToolbarSettings:
     collapsed: bool = False
     orientation: str = "horizontal"      # "horizontal" | "vertical"
     button_keys: list[str] = field(default_factory=lambda: ["placeholder"])
+
+
+@dataclass
+class WhoLookupSettings:
+    """Settings for the Who Character Lookup feature."""
+
+    enabled: bool = True
+    show_own_character: bool = False
+    show_current_dkp: bool = True
+    show_earned_dkp: bool = True
+    show_spent_dkp: bool = True
+    show_recent_items: bool = True
 
 
 @dataclass
@@ -99,6 +112,7 @@ class AppSettings:
     appearance: AppearanceSettings = field(default_factory=AppearanceSettings)
     gravity_bot: GravityBotSettings = field(default_factory=GravityBotSettings)
     toolbar: ToolbarSettings = field(default_factory=ToolbarSettings)
+    who_lookup: WhoLookupSettings = field(default_factory=WhoLookupSettings)
     feature_flags: FeatureFlagsSettings = field(default_factory=FeatureFlagsSettings)
     window_geometry: bytes = field(default_factory=bytes)
     setup_wizard_completed: bool = False

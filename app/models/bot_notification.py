@@ -10,7 +10,8 @@ from typing import Any
 # ── Known notification kind constants ─────────────────────────────────────────
 KIND_RAID_LOG_ACK = "RAID_LOG_ACK"  # bot confirmed receipt of a submitted raid log
 KIND_ANNOUNCEMENT = "ANNOUNCEMENT"  # broadcast message sent to all connected clients
-KIND_UNKNOWN = "UNKNOWN"            # forward-compat catch-all for unrecognised frames
+KIND_CHARACTER_SET_RESULT = "character_set_result"  # server response to a character_set message
+KIND_UNKNOWN = "UNKNOWN"  # forward-compat catch-all for unrecognised frames
 
 
 @dataclass

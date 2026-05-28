@@ -1,20 +1,13 @@
+<img align="left" hspace="10" src="resources/full_logo_128.png">
+
 # Gravity Nexus
 
-Raid tools and integration with Gravity's Discord bot and DKP website, for Project 1999.
+Gravity Nexus is a desktop companion app for Gravity guild members. It provides in-game tools like raid log submission, character lookup, and more. It integrates with Gravity Bot and the DKP website. Similar to EQ Tools, GINA, or Pulse, it works by reading your log files.
 
-![Gravity Nexus](docs/images/gravity_nexus_main_window.PNG)
+<br>
 
----
+![Gravity Nexus](docs/images/gravity_nexus_main_window_v0_2_0.PNG)
 
-## Table of Contents
-
-- [Installation](#installation)
-- [Setup & Configuration](#setup--configuration)
-- [Features](#features)
-  - [Raid Tools](#raid-tools)
-  - [Gravity Bot Integration](#gravity-bot-integration)
-  - [Overlays](#overlays)
-- [Developers](#developers)
 
 ---
 
@@ -45,37 +38,94 @@ Raid tools and integration with Gravity's Discord bot and DKP website, for Proje
 
 3. **You're ready** — All preferences can be changed later.
 
+---
+
 ## Features
 
-- **Software updates** — Gravity Nexus can check for and install new releases automatically. To update your version go to Settings → General → Software Updates.
-- **Guild Chat Stream Forwarding** — Gravity Nexus app will forward guild chat messages to the bot so they can be displayed in guild-chat-stream in discord. As long as one person with gravity nexus is online we will have guild chat stream messages.
-- **Raid Log Capture** — Capture raid logs in game using /who and Gravity Nexus will open a popup window to let you submit them directly to the bot. No more saving logs and manually uploading them.
-- **Authentication via gravityp99.com** — As long as you're logged into the website authentication is as easy as clicking a button and then Gravity Nexus knows who you are and what discord roles you have
+### Update From Within the App
 
-### Raid Tools
+Gravity Nexus can check for new releases automatically and update itself.
 
-The **Raid Log Capture** tool captures raid attendance from `/who` output and submits it to the Gravity Discord bot.
+To update your version go to General → Software Updates.
+
+
+### Authentication via gravityp99.com
+
+Gravity Nexus uses our DKP website https://gravityp99.com/ to authenticate. Once you're authenticated the app knows who you are and what discord roles you have.
+
+When authentication is needed this window will appear
+
+![Browser Sign In](docs/images/sign_in_with_browser.PNG)
+
+Clicking "Sign in with Browser" will take you to the DKP website where you can log in normally or if you're already logged 
+in will display this page asking for permission to authenticate. Click "Allow Access" and you're authenticated.
+
+![Website Auth Page](docs/images/website_auth_page.PNG)
+
+
+### Guild Chat Stream Forwarding
+
+Gravity Nexus app will forward guild chat messages to the bot so they can be displayed in guild-chat-stream in discord. As long as one person with gravity nexus is online we will have guild chat stream messages.
+
+This feature is on by default, and you don't need to do anything for it to work other than being in game on a guild tagged character. 
+
+
+### Guild Bot Status and Operators
+
+Gravity Nexus will automatically update gravity bot whenever you log into a bot or when you log out of a bot. This lets gravity bot 
+provide better feedback about which bots are currently taken and who is currently on a bot.
+
+Gravity Nexus also updates gravity bot when you take a /who in game and guild bots appear on the list. So if someone is wondering 
+what bots are available you can do a `/who all guild` in game to let gravity bot know what characters are still in game.
+
+
+### Raid Log Capture
+
+Capture raid attendance using `/who` in game and submit the logs directly to raid logs in discord.
 
 **How to use:**
 
 1. Type `/t nexusraidlog` in EverQuest chat to start a raid log capture.
 2. Type `/who` to take the raid log.
-3. The **Raid Submit** overlay will appear — select the raid from the dropdown and confirm.
 
-> **Tip:** Combine the two commands into a social for easy one-button use.
+> [!TIP]
+> Combine the two commands into a social for easy one-button use.
 
-**Quick Raid Logs** — When enabled (Settings → Raid Tools), typing `/who` twice within 5 seconds will automatically trigger a capture without needing the `/t nexusraidlog` step.
+3. The **Raid Log** overlay will appear — select the raid from the dropdown and press **Submit to Gravity Bot**.
 
-### Gravity Bot Integration
+<p align="center">
+  <img src="docs/images/raid_log_capture.PNG">
+</p>
 
-Gravity Nexus connects to the Gravity Bot to relay in-game events to Discord.
+4. The raid logs will appear in discord and attendance will be updated.
 
-- **Guild chat relay** — Guild chat lines are forwarded to the bot in real time so they can be displayed in the guild-chat-stream channel  (toggle in Settings → General).
+<p align="center">
+  <img src="docs/images/raid_log_added_to_channel.PNG">
+</p>
 
 
-### Overlays
+**Quick Raid Logs** — When enabled (Raid Tools → Raid Log Capture → Settings), typing `/who` twice within 5 seconds will automatically trigger a capture without needing the `/t nexusraidlog` step.
 
-**Positioning overlays:** Go to **Settings → Overlays** and click **Position Overlays** to drag all overlays to your preferred screen positions. Click **Save Positions** when done.
 
-Global overlay options include enabling/disabling all overlays and adjusting opacity.
+### Who Character Lookup
 
+Display character data (DKP, alts, recent items) in an overlay when doing `/who character` in game.
+
+> [!TIP]
+> Target a character and use `/whot` to easily do a lookup
+
+
+#### Character Lookup
+
+The fields that are displayed when looking up a character can be configured in Raid Tools → Who Character Lookup → Settings
+
+![Character Lookup](docs/images/character_lookup.PNG)
+
+#### Bot Lookup (Unknown Operator)
+
+![Bot Unknown Operator](docs/images/character_lookup_bot_no_operator.PNG)
+
+
+#### Bot Lookup (Known Operator)
+
+![Bot Unknown Operator](docs/images/character_lookup_bot_with_operator.PNG)

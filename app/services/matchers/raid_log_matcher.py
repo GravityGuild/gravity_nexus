@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # When user sends /t nexusraidlog or /t nexusraidlogs start looking for logs so they can make a social in game to trigger them
 _TELL_START_TRIGGER_RE: re.Pattern = re.compile(r"^nexusraidlogs? is not online at this time\.$")
 
-_WHO_START_RE: re.Pattern = re.compile(r"^Players on EverQuest:\s*$")
+_WHO_START_RE: re.Pattern = re.compile(r"^Players (?:on|in) EverQuest:\s*$")
 
 # End-of-log summary e.g. "There are 19 players in East Commonlands."
 _WHO_END_RE: re.Pattern = re.compile(r"^There (?:are|is) \d+ players? in .+\.\s*$")
@@ -41,6 +41,8 @@ _PLAYER_RE: re.Pattern = re.compile(
     r"(?P<name>[A-Za-z]+)"
     r"(?:\s+\((?P<race>[^)]+)\))?"
     r"(?:\s+<(?P<guild>[^>]+)>)?"
+    r"(?:\s+ZONE:\s*(?P<zone>\S+))?"
+    r"(?:\s+LFG)?"
     r"\s*$",
 )
 
@@ -146,6 +148,9 @@ class RaidLogMatcher(LogMatcher):
         # States: "idle" | "first_who" | "between"
         self._quick_state: str = "idle"
         self._first_who_end_time: Optional[datetime] = None
+        self._first_who_lines: list[str] = []
+        self._triggered_by_quick: bool = False
+        self._active_character: str = ""
 
     @property
     def quick_raid_logs_enabled(self) -> bool:
@@ -156,6 +161,11 @@ class RaidLogMatcher(LogMatcher):
         self._quick_raid_logs_enabled = value
         if not value:
             self._quick_state = "idle"
+            self._first_who_lines.clear()
+            self._triggered_by_quick = False
+
+    def set_active_character(self, char: str) -> None:
+        self._active_character = char
 
     @property
     def is_collecting(self) -> bool:
@@ -195,29 +205,59 @@ class RaidLogMatcher(LogMatcher):
         if self._quick_state == "idle":
             if _WHO_START_RE.match(body):
                 self._quick_state = "first_who"
+                self._first_who_lines.clear()
 
         elif self._quick_state == "first_who":
-            if _WHO_END_RE.match(body):
-                self._quick_state = "between"
-                self._first_who_end_time = datetime.now()
+            m = _PLAYER_RE.match(body)
+            if m:
+                level_str = m.group("level")
+                is_anonymous = level_str is None
+                guild = m.group("guild")
+                if guild == "Gravity" or (guild is None and is_anonymous):
+                    self._first_who_lines.append(m.group("name"))
+            elif _WHO_END_RE.match(body):
+                if not self._first_who_lines:
+                    # No relevant characters in first /who — reset, don't arm
+                    self._quick_state = "idle"
+                else:
+                    self._quick_state = "between"
+                    self._first_who_end_time = datetime.now()
 
         elif self._quick_state == "between":
             if _WHO_START_RE.match(body):
                 elapsed = (datetime.now() - self._first_who_end_time).total_seconds() if self._first_who_end_time else 999
                 if elapsed <= self._QUICK_WINDOW_SECONDS:
                     log.debug("Quick raid log triggered (%.1fs gap)", elapsed)
-                    self._start_collecting()
+                    self._start_collecting(quick=True)
                 else:
                     # Gap too long — treat this as a fresh first /who
                     self._quick_state = "first_who"
+                    self._first_who_lines.clear()
 
-    def _start_collecting(self):
+    def _start_collecting(self, quick: bool = False) -> None:
         log.debug("Raid log collection started")
         self._collection_start_time = datetime.now()
         self._collecting = True
+        self._triggered_by_quick = quick
         self._quick_state = "idle"
         self._accumulator.clear()
 
     def _on_complete(self, lines: list[str], full_who_log: str) -> None:
+        if self._triggered_by_quick:
+            if not lines:
+                log.debug("Quick raid log discarded: no characters found")
+                self._first_who_lines.clear()
+                return
+            if self._active_character and self._active_character.lower() not in {n.lower() for n in lines}:
+                log.debug("Quick raid log discarded: active character %r not in log", self._active_character)
+                self._first_who_lines.clear()
+                return
+            if sorted(lines) != sorted(self._first_who_lines):
+                log.debug("Quick raid log discarded: first and second /who differ")
+                self._first_who_lines.clear()
+                return
+
+        self._first_who_lines.clear()
+        self._triggered_by_quick = False
         log.info("Raid log complete: %d lines", len(lines))
         self.raid_log_detected.emit([lines, full_who_log])

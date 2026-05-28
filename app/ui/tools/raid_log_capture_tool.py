@@ -49,6 +49,10 @@ class RaidLogCaptureTool(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._card)
 
+    @property
+    def card(self) -> ToolCard:
+        return self._card
+
     def _build_overview(self) -> None:
         self._card.add_overview_widget(ThemedLabel(
             "Captures a raid log using /who in game and displays a pop up window to submit the raid logs to discord. "

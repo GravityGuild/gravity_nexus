@@ -9,7 +9,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject
 
-from models.log_event import LogEvent
+from models.log_event import LogEvent, LogSource
 
 
 class LogMatcher(QObject):
@@ -64,13 +64,21 @@ class LogMatcher(QObject):
     # ── UI metadata — override in subclasses ───────────────────────────────────
     #: Human-readable label shown in the Parsing settings page.
     DISPLAY_NAME: str = ""
+
     #: One-line description shown below the toggle.
     DESCRIPTION: str = ""
+
     #: Unique snake_case key used to persist the enabled state.
     #: Leave empty to hide the matcher from the UI.
     MATCHER_KEY: str = ""
+
     #: Whether the matcher should be enabled when first seen (no saved state).
     ENABLED_BY_DEFAULT: bool = True
+
+    #: Which log sources this matcher should receive events from.
+    #: Defaults to the main EQ log only.  Override to subscribe to dbg.txt
+    #: events (``{LogSource.DBG_TXT}``) or both sources.
+    SOURCES: frozenset[LogSource] = frozenset({LogSource.EQ_LOG})
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)

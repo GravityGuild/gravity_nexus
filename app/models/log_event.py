@@ -1,9 +1,16 @@
 """Log event model — represents a single parsed EverQuest log line."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
+
+
+class LogSource(Enum):
+    """Which log file a ``LogEvent`` originated from."""
+
+    EQ_LOG = auto()   # eqlog_{Character}_project1999.txt
+    DBG_TXT = auto()  # dgb.txt (client debug log)
 
 
 class LogEventKind(Enum):
@@ -27,4 +34,5 @@ class LogEvent:
     raw: str
     message: str
     kind: LogEventKind = LogEventKind.UNKNOWN
+    source: LogSource = field(default=LogSource.EQ_LOG)
 

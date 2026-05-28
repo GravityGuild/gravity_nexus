@@ -124,6 +124,11 @@ class GeneralPage(QWidget):
             "Send guild chat to Gravity Bot",
             "send_guild_chat",
         )
+        self._add_toggle_row(
+            integrations_card,
+            "Send /who results to Gravity Bot",
+            "send_who_result",
+        )
 
         # ── Card: Software Updates ────────────────────────────────────────────
         update_card = SettingsCard(
@@ -185,6 +190,9 @@ class GeneralPage(QWidget):
         self._toggle_send_guild_chat.set_checked(
             self._svc.settings.gravity_bot.send_guild_chat, animated=False
         )
+        self._toggle_send_who_result.set_checked(
+            self._svc.settings.gravity_bot.send_who_result, animated=False
+        )
         self._refresh_discovery_label(g.log_directory)
         self._refresh_update_controls()
 
@@ -196,6 +204,7 @@ class GeneralPage(QWidget):
         g.minimize_to_tray = self._toggle_minimize_tray.is_checked()
         g.check_for_updates = self._toggle_check_updates.is_checked()
         self._svc.settings.gravity_bot.send_guild_chat = self._toggle_send_guild_chat.is_checked()
+        self._svc.settings.gravity_bot.send_who_result = self._toggle_send_who_result.is_checked()
         self._svc.save()
         self._refresh_update_controls()
 
