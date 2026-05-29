@@ -13,7 +13,7 @@
 
 ; VERSION — keep this in sync with app/_version.py (__version__)
 #define AppName        "Gravity Nexus"
-#define AppVersion     "0.1.0"
+#define AppVersion     "0.2.0"
 #define AppPublisher   "GravityNexus"
 #define AppURL         "https://github.com/GravityGuild/gravity_nexus"
 #define AppExeName     "GravityNexus.exe"
