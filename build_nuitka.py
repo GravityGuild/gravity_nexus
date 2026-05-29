@@ -61,6 +61,8 @@ def build() -> int:
         "--follow-imports",
         # Optimisation
         "--python-flag=no_site",
+        # Disable zstd compression to avoid OOM during onefile packing
+        "--onefile-no-compression",
         # Entry point
         str(ENTRY_POINT),
     ]
