@@ -56,6 +56,7 @@ class BaseOverlayWindow(QWidget):
         self,
         title: str = "Overlay",
         parent: Optional[QWidget] = None,
+        title_centered: bool = False,
     ) -> None:
         super().__init__(
             parent,
@@ -67,6 +68,7 @@ class BaseOverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         self._title = title
+        self._title_centered = title_centered
         self._click_through = False
         self._drag_pos: Optional[QPoint] = None
         self._base_size: Optional[tuple[int, int]] = None  # captured on first scale call
@@ -90,7 +92,7 @@ class BaseOverlayWindow(QWidget):
         frame_layout.setSpacing(0)
 
         # Handle bar (drag target + title)
-        self._handle = _HandleBar(self._title, self)
+        self._handle = _HandleBar(self._title, self, centered=self._title_centered)
         self._handle.setObjectName("OverlayHandleBar")
         frame_layout.addWidget(self._handle)
 
@@ -204,12 +206,19 @@ class BaseOverlayWindow(QWidget):
 class _HandleBar(QWidget):
     """Thin drag bar at the top of an overlay window."""
 
-    def __init__(self, title: str, overlay: BaseOverlayWindow) -> None:
+    def __init__(self, title: str, overlay: BaseOverlayWindow, centered: bool = False) -> None:
         super().__init__(overlay)
         self._overlay = overlay
         self._title = title
+        self._centered = centered
+        self._right_reserved: int = 0
         self.setFixedHeight(24)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
+
+    def set_right_reserved(self, width: int) -> None:
+        """Reserve *width* pixels on the right so the title text doesn't overlap child widgets."""
+        self._right_reserved = width
+        self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -234,20 +243,26 @@ class _HandleBar(QWidget):
         font.setPointSize(14)
         p.setFont(font)
 
-        rect = self.rect().adjusted(8, 0, -8, 0)
-        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        rect = self.rect().adjusted(8, 0, -8 - self._right_reserved, 0)
 
-        # Draw accent glyph in cyan
-        p.setPen(QColor(*ACCENT_CYAN_RGB))
-        p.drawText(rect, align, "◈  ")
-
-        # Measure glyph width so title text starts after it
-        glyph_w = p.fontMetrics().horizontalAdvance("◈  ")
-        title_rect = rect.adjusted(glyph_w, 0, 0, 0)
-
-        # Draw title in high-contrast primary text colour
-        p.setPen(QColor(*TEXT_PRIMARY_RGB))
-        p.drawText(title_rect, align, self._title)
+        if self._centered:
+            glyph = "◈  "
+            glyph_w = p.fontMetrics().horizontalAdvance(glyph)
+            title_w = p.fontMetrics().horizontalAdvance(self._title)
+            total_w = glyph_w + title_w
+            x = (self.width() - total_w) // 2
+            vcenter = Qt.AlignmentFlag.AlignVCenter
+            p.setPen(QColor(*ACCENT_CYAN_RGB))
+            p.drawText(rect.adjusted(x - 8, 0, 0, 0), vcenter, glyph)
+            p.setPen(QColor(*TEXT_PRIMARY_RGB))
+            p.drawText(rect.adjusted(x - 8 + glyph_w, 0, 0, 0), vcenter, self._title)
+        else:
+            align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            p.setPen(QColor(*ACCENT_CYAN_RGB))
+            p.drawText(rect, align, "◈  ")
+            glyph_w = p.fontMetrics().horizontalAdvance("◈  ")
+            p.setPen(QColor(*TEXT_PRIMARY_RGB))
+            p.drawText(rect.adjusted(glyph_w, 0, 0, 0), align, self._title)
 
         p.end()
 

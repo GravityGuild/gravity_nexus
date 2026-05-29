@@ -28,6 +28,7 @@ from ui.cards.settings_card import SettingsCard
 from ui.widgets.themed_button import ThemedButton
 from ui.widgets.themed_label import ThemedLabel
 from ui.widgets.themed_widgets import ThemedComboBox, ThemedLineEdit
+from ui.widgets.popup_search_bar import PopupSearchBar
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,18 @@ _SPEED_OPTIONS: list[tuple[str, int]] = [
 
 _MAX_FEED_LINES = 200
 
+_SAMPLE_ZONES: list[str] = [
+    "Ak'Anon", "Befallen", "Castle Mistmoore", "Crushbone", "East Commonlands",
+    "Erudin", "Felwithe", "East Freeport", "Lower Guk", "Upper Guk", "Halas",
+    "High Keep", "Highpass Hold", "Kelethin", "Kithicor Forest",
+    "Lavastorm Mountains", "Najena", "Neriak", "Nektulos Forest",
+    "Oasis of Marr", "Ocean of Tears", "Permafrost Caverns",
+    "Plane of Air", "Plane of Fear", "Plane of Hate", "Plane of Sky",
+    "Qeynos Hills", "Rathe Mountains", "Rivervale", "Runnyeye Citadel",
+    "Solusek's Eye", "South Karana", "Splitpaw Lair", "Steamfont Mountains",
+    "The Feerott", "The Hole", "Unrest",
+]
+
 
 class DevToolsPage(QWidget):
     """Developer utilities page: log injection, auth tools, and app state."""
@@ -73,6 +86,7 @@ class DevToolsPage(QWidget):
         self._svc = fake_log_svc
         self._parser_svc = registry.get(ILogParserService)
         self._replay_file_path: Optional[Path] = None
+        self._search_popup: Optional[PopupSearchBar] = None
 
         self._build_ui()
         self._connect_signals()
@@ -114,6 +128,7 @@ class DevToolsPage(QWidget):
         self._tabs.addTab(self._build_log_injection_tab(), "Log Injection")
         self._tabs.addTab(self._build_auth_tab(), "Auth")
         self._tabs.addTab(self._build_app_tab(), "App")
+        self._tabs.addTab(self._build_widgets_tab(), "Widgets")
         outer.addWidget(self._tabs)
 
     def _make_tab_scroll(self) -> tuple[QScrollArea, QVBoxLayout]:
@@ -315,6 +330,42 @@ class DevToolsPage(QWidget):
         vl.addStretch()
         return scroll
 
+    def _build_widgets_tab(self) -> QScrollArea:
+        scroll, vl = self._make_tab_scroll()
+
+        search_card = SettingsCard(
+            "Popup Search Bar",
+            "Open the popup search bar. Type to filter the sample P99 zone list — "
+            "suggestions appear above or below depending on where the popup is anchored.",
+        )
+
+        placeholder_row = QHBoxLayout()
+        placeholder_lbl = ThemedLabel("Placeholder:")
+        placeholder_lbl.setFixedWidth(90)
+        self._search_placeholder_edit = ThemedLineEdit("Search zones…")
+        self._search_placeholder_edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        placeholder_row.addWidget(placeholder_lbl)
+        placeholder_row.addWidget(self._search_placeholder_edit)
+        search_card.add_layout(placeholder_row)
+
+        btn_row = QHBoxLayout()
+        self._open_search_btn = ThemedButton("Open Search Bar", ThemedButton.VARIANT_PRIMARY)
+        self._open_search_btn.clicked.connect(self._on_open_search_bar)
+        btn_row.addWidget(self._open_search_btn)
+        btn_row.addStretch()
+        search_card.add_layout(btn_row)
+
+        self._search_result_lbl = ThemedLabel(
+            "No result yet.", font_size=FontSize.SMALL, color_role=ColorRole.TEXT_MUTED
+        )
+        search_card.add_widget(self._search_result_lbl)
+        vl.addWidget(search_card)
+
+        vl.addStretch()
+        return scroll
+
     # ── Signal wiring ──────────────────────────────────────────────────────────
 
     def _connect_signals(self) -> None:
@@ -474,3 +525,24 @@ class DevToolsPage(QWidget):
         svc.save()
         self._reset_wizard_btn.setEnabled(False)
         self._wizard_reset_lbl.setVisible(True)
+
+    # ── Search bar widget test ─────────────────────────────────────────────────
+
+    @Slot()
+    def _on_open_search_bar(self) -> None:
+        placeholder = self._search_placeholder_edit.text() or "Search…"
+        self._search_popup = PopupSearchBar(placeholder=placeholder)
+
+        def on_text(t: str) -> None:
+            t_low = t.lower()
+            matches = [z for z in _SAMPLE_ZONES if t_low in z.lower()] if t else []
+            self._search_popup.set_suggestions(matches)  # type: ignore[union-attr]
+
+        self._search_popup.text_changed.connect(on_text)
+        self._search_popup.submitted.connect(self._on_search_submitted)
+        self._search_popup.show_saved()
+
+    @Slot(str)
+    def _on_search_submitted(self, value: str) -> None:
+        self._search_result_lbl.setText(f'Submitted: "{value}"')
+        self._search_result_lbl.set_color_role(ColorRole.ACCENT_PRIMARY)

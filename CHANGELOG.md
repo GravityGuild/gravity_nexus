@@ -14,7 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## Unreleased
+### Added
+- Pop up search bar widget
+- Overlay windows now have individual accept/cancel buttons on them when in positioning mode
+- Added better default layout
 
+### Changed
+- Updated how default layouts get managed and stored
 
 ## v0.2.0
 

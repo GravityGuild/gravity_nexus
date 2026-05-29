@@ -3,12 +3,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QWidget,
 )
 
@@ -64,11 +63,14 @@ class SearchBox(QWidget):
         self._edit.returnPressed.connect(self._on_return)
         layout.addWidget(self._edit)
 
-        self._clear_btn = QPushButton("✕")
+        self._clear_btn = QLabel("✕")
         self._clear_btn.setObjectName("SearchBoxClearBtn")
         self._clear_btn.setFixedSize(16, 16)
+        self._clear_btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._clear_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._clear_btn.hide()
-        self._clear_btn.clicked.connect(self._edit.clear)
+        self._clear_btn.mousePressEvent = lambda _e: self._edit.clear()
         layout.addWidget(self._clear_btn)
 
     def _on_text_changed(self, text: str) -> None:
