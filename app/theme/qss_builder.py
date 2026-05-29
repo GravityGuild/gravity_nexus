@@ -318,6 +318,23 @@ QLineEdit:disabled {{ color: rgba(147, 164, 195, 60); border-color: rgba(87, 199
     padding: 0;
 }}
 #SearchBoxClearBtn:hover {{ color: {tp}; }}
+/* ═══ POPUP SEARCH BAR ═════════════════════════════════════════════════════ */
+#PopupSearchBar {{ background: transparent; }}
+#PopupSuggestionList {{
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 4px 0;
+}}
+#PopupSuggestionList::item {{
+    color: {tp};
+    font-size: {sz[FontSize.SMALL]}px;
+    padding: 6px 14px;
+    border-radius: 4px;
+    min-height: 22px;
+}}
+#PopupSuggestionList::item:hover    {{ background: rgba(87, 199, 255, 28); }}
+#PopupSuggestionList::item:selected {{ background: rgba(87, 199, 255, 55); color: {tp}; }}
 /* ═══ COMBO BOX ════════════════════════════════════════════════════════════ */
 QComboBox {{
     background: rgba(11, 23, 48, 200);

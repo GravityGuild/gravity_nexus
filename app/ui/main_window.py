@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from PySide6.QtCore import QPoint, Qt, Slot
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -32,9 +32,10 @@ from core.registry import registry
 from services.fake_log_service import FakeLogService
 from services.protocols import IGravityBotService, ILogParserService, ISettingsService, IUpdateService
 from services.mock_data_provider import MockDataProvider
+from ui.overlays.overlay_config import OVERLAY_CONFIG_MAP, resolve_default_position
 from ui.overlays.raid_submit_overlay import RaidSubmitOverlay
 from ui.overlays.who_lookup_overlay import WhoLookupOverlay
-from ui.overlays.positioning_overlay import PositioningOverlay
+from ui.overlays.positioning_overlay_manager import PositioningOverlayManager
 from ui.overlays.quick_toolbar_overlay import QuickToolbarOverlay
 from utils.resource_utils import get_asset
 from ui.pages import (
@@ -78,8 +79,7 @@ class MainWindow(QWidget):
         self._who_overlay: Optional[WhoLookupOverlay] = None
         self._toolbar_overlay: Optional[QuickToolbarOverlay] = None
         self._active_character: str = ""
-        self._positioning_overlays: list[PositioningOverlay] = []
-        self._position_snapshot: dict[str, tuple[int, int, int, int]] = {}  # pre-drag snapshot
+        self._positioning_manager = PositioningOverlayManager(self._svc)
         self._quitting: bool = False  # True when a real quit is in progress
 
         # Frameless + transparent background for drop shadow
@@ -229,9 +229,10 @@ class MainWindow(QWidget):
         self._advanced_page.stop_parser_requested.connect(self._parser_svc.stop)
 
         # Overlay positioning
-        self._overlays_page.position_overlays_requested.connect(self._on_position_overlays_requested)
-        self._overlays_page.cancel_position_overlays_requested.connect(self._cancel_positioning_overlays)
+        self._overlays_page.position_overlays_requested.connect(self._positioning_manager.on_requested)
+        self._overlays_page.cancel_position_overlays_requested.connect(self._positioning_manager.cancel)
         self._overlays_page.opacity_changed.connect(self._on_overlay_opacity_changed)
+        self._positioning_manager.set_all_closed_callback(self._overlays_page.reset_positioning_button)
 
         # Background throttling — reduce update rates when the app loses focus
         app = QApplication.instance()
@@ -364,14 +365,12 @@ class MainWindow(QWidget):
             x, y, w, h = saved
             if w > 0 and h > 0:
                 self._raid_overlay.resize(w, h)
-            x, y = self._clamp_to_screen(x, y, w, h)
+            x, y = PositioningOverlayManager.clamp_to_screen(x, y, w, h)
             self._raid_overlay.move(x, y)
         else:
             screen = QApplication.primaryScreen().geometry()
-            self._raid_overlay.move(
-                screen.center().x() - 250,
-                screen.center().y() - 180,
-            )
+            x, y = resolve_default_position(OVERLAY_CONFIG_MAP["raid_submit"], self._raid_overlay.width(), self._raid_overlay.height(), screen)
+            self._raid_overlay.move(x, y)
 
         self._raid_overlay.show()
         self._raid_overlay.position_changed.connect(self._on_raid_overlay_moved)
@@ -422,14 +421,12 @@ class MainWindow(QWidget):
             x, y, w, h = saved
             if w > 0 and h > 0:
                 self._who_overlay.resize(w, h)
-            x, y = self._clamp_to_screen(x, y, w, h)
+            x, y = PositioningOverlayManager.clamp_to_screen(x, y, w, h)
             self._who_overlay.move(x, y)
         else:
             screen = QApplication.primaryScreen().geometry()
-            self._who_overlay.move(
-                screen.center().x() - 200,
-                screen.center().y() - 130,
-            )
+            x, y = resolve_default_position(OVERLAY_CONFIG_MAP["who_lookup"], self._who_overlay.width(), self._who_overlay.height(), screen)
+            self._who_overlay.move(x, y)
 
         self._who_overlay.show()
 
@@ -468,126 +465,11 @@ class MainWindow(QWidget):
                 self._toolbar_overlay.set_overlay_opacity(opacity)
             except RuntimeError:
                 pass
-        for w in self._positioning_overlays:
+        for w in self._positioning_manager.active_overlays:
             try:
                 w.set_overlay_opacity(opacity)
             except RuntimeError:
                 pass
-
-    # ── Overlay positioning ────────────────────────────────────────────────────
-
-    @staticmethod
-    def _clamp_to_screen(x: int, y: int, w: int, h: int) -> tuple[int, int]:
-        """Return (x, y) clamped so a w×h overlay stays on a visible screen.
-
-        Resolves the screen from the overlay's centre point so overlays on
-        secondary monitors are kept there rather than snapped to the primary.
-        """
-        screen = QApplication.screenAt(QPoint(x + w // 2, y + h // 2))
-        if screen is None:
-            screen = QApplication.primaryScreen()
-        avail = screen.availableGeometry()
-        x = max(avail.left(), min(x, avail.right() - max(w, 50)))
-        y = max(avail.top(), min(y, avail.bottom() - max(h, 50)))
-        return x, y
-
-    #: Maps overlay key → (display_label, default_size)
-    _OVERLAY_REGISTRY: dict[str, tuple[str, tuple[int, int]]] = {
-        "raid_submit": ("Raid Submit", (500, 360)),
-        "who_lookup":  ("Who Lookup",  (400, 260)),
-        "toolbar":     ("Quick Toolbar", (150, 80)),
-    }
-
-    def _on_position_overlays_requested(self, active: bool) -> None:
-        if active:
-            self._show_positioning_overlays()
-        else:
-            self._save_and_close_positioning_overlays()
-
-    def _show_positioning_overlays(self) -> None:
-        """Spawn a draggable placeholder for every registered overlay type."""
-        self._save_and_close_positioning_overlays()  # clear any leftovers
-
-        # Hide the live toolbar so the positioning placeholder is unobstructed.
-        if self._toolbar_overlay is not None:
-            try:
-                self._toolbar_overlay.hide()
-            except RuntimeError:
-                pass
-
-        # Snapshot current positions so Cancel can restore them
-        self._position_snapshot = dict(self._svc.settings.overlay.positions)
-
-        from feature_flags import feature_enabled  # noqa: PLC0415
-        screen = QApplication.primaryScreen().geometry()
-        for key, (label, size) in self._OVERLAY_REGISTRY.items():
-            if key == "toolbar" and not feature_enabled("quick_toolbar", self._svc.settings):
-                continue
-            w = PositioningOverlay(key, label, size)
-            # Apply opacity/scale FIRST so _base_size is captured from the natural
-            # default size.  The saved size is then applied as a hard override
-            # afterwards, preventing compounding growth on each save/restore cycle.
-            w.set_overlay_opacity(self._svc.settings.overlay.opacity)
-            w.set_overlay_scale(self._svc.settings.overlay.scale)
-            saved = self._svc.settings.overlay.positions.get(key)
-            if saved:
-                x, y, sw, sh = saved
-                if sw > 0 and sh > 0:
-                    w.resize(sw, sh)
-                w.move(x, y)
-            else:
-                w.move(
-                    screen.center().x() - size[0] // 2,
-                    screen.center().y() - size[1] // 2,
-                )
-            w.show()
-            self._positioning_overlays.append(w)
-
-    def _save_and_close_positioning_overlays(self) -> None:
-        """Persist current geometry (position + size) and close all positioning windows."""
-        for w in self._positioning_overlays:
-            try:
-                p = w.pos()
-                sz = w.size()
-                self._svc.settings.overlay.positions[w.overlay_key] = (
-                    p.x(), p.y(), sz.width(), sz.height()
-                )
-                w.close()
-            except RuntimeError:
-                pass
-        self._positioning_overlays.clear()
-        self._position_snapshot.clear()
-        self._svc.save()
-        # Re-show toolbar at its (possibly new) saved position.
-        self._restore_toolbar_position()
-
-    def _cancel_positioning_overlays(self) -> None:
-        """Close positioning windows and restore positions to the pre-drag snapshot."""
-        for w in self._positioning_overlays:
-            try:
-                w.close()
-            except RuntimeError:
-                pass
-        self._positioning_overlays.clear()
-        # Restore the snapshot — overwrite any keys that were added/changed
-        self._svc.settings.overlay.positions = dict(self._position_snapshot)
-        self._position_snapshot.clear()
-        self._svc.save()
-        # Re-show toolbar at its original (snapshot) position.
-        self._restore_toolbar_position()
-
-    def _restore_toolbar_position(self) -> None:
-        """Move the toolbar to its saved position and make it visible."""
-        if self._toolbar_overlay is None:
-            return
-        try:
-            saved = self._svc.settings.overlay.positions.get("toolbar")
-            if saved:
-                x, y = saved[0], saved[1]
-                self._toolbar_overlay.move(x, y)
-            self._toolbar_overlay.show()
-        except RuntimeError:
-            pass
 
     # ── Quick toolbar overlay ──────────────────────────────────────────────────
 
@@ -600,6 +482,7 @@ class MainWindow(QWidget):
             return
 
         self._toolbar_overlay = QuickToolbarOverlay()
+        self._positioning_manager.set_toolbar_overlay(self._toolbar_overlay)
         self._toolbar_overlay.set_overlay_opacity(self._svc.settings.overlay.opacity)
         self._toolbar_overlay.set_overlay_scale(self._svc.settings.overlay.scale)
 
@@ -609,10 +492,8 @@ class MainWindow(QWidget):
             self._toolbar_overlay.move(saved[0], saved[1])
         else:
             screen = QApplication.primaryScreen().geometry()
-            self._toolbar_overlay.move(
-                screen.center().x() - 60,
-                screen.top() + 80,
-            )
+            x, y = resolve_default_position(OVERLAY_CONFIG_MAP["toolbar"], self._toolbar_overlay.width(), self._toolbar_overlay.height(), screen)
+            self._toolbar_overlay.move(x, y)
 
         self._toolbar_overlay.position_changed.connect(self._on_toolbar_position_changed)
         self._toolbar_overlay.show()

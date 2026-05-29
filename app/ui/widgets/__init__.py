@@ -14,6 +14,7 @@ from ui.widgets.search_box import SearchBox
 from ui.widgets.h_line import HLine
 from ui.widgets.status_widgets import SectionHeader, StatusIndicator
 from ui.widgets.overlay_preview import OverlayPreviewPanel
+from ui.widgets.popup_search_bar import PopupSearchBar
 
 __all__ = [
     "AppIcon",
@@ -32,5 +33,6 @@ __all__ = [
     "SectionHeader",
     "StatusIndicator",
     "OverlayPreviewPanel",
+    "PopupSearchBar",
 ]
 
